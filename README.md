@@ -1,5 +1,12 @@
 # NEO
 
+**Fork purposes**
+
+This fork has been made to clean the code and try to make programming new features more future proof.
+The aim is to first divide the almost 10k lines app.js file into lots of different helper scripts.
+Later, the code could be moved to a framework like react or angular to allow a better structuring (depending on the scope of the project).
+Typescript, linting and unit testing might be a good idea too.
+
 **A distraction-free word processor for authors, by a wannabe author.**
 
 NEO understands from the moment you install it that you are writing *books* and nothing else. No bloat, no distractions, with manuscripts that look like books as you write them.
