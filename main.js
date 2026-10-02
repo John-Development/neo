@@ -1336,7 +1336,7 @@ function createWindow() {
       spellcheck: true
     }
   });
-  win.loadFile('index.html');
+  win.loadFile('src/index.html');
   // The menu bar follows the real full-screen state, whoever changed it.
   // Electron only puts the bar back after a full screen it entered itself,
   // so once a window manager's own full-screen key had been used (Sway, i3),

@@ -1,0 +1,405 @@
+/* ================================================================== */
+/*  STRUCTURED OUTLINE                                                 */
+/*  Chapter lines are the book's real chapters. Section notes become   */
+/*  grayed "ghost" paragraphs in the manuscript                       */
+/* ================================================================== */
+
+const secLetter = (i) => String.fromCharCode(65 + (i % 26));
+
+/**
+ * Where the caret goes after a section is removed from the outline: the end of the section ABOVE it,
+ * the way a text editor behaves. Only the first section has no line above it, and then the chapter's
+ * own line is where the caret belongs.
+ */
+function focusAfterSectionRemoved(list, index, chId) {
+  const above = index > 0 ? list[index - 1] : undefined;
+  return above ? { secId: above.id } : { chId };
+}
+
+function renderOutline(focusTarget) {
+  book.sectionNotes = book.sectionNotes || {};
+  book.chapterNotes = book.chapterNotes || {};
+  const wrap = $('#outline-list');
+  wrap.innerHTML = '';
+
+  // the story's lines, with each part standing over its chapters (the pages
+  // a book carries have nothing to outline)
+  book.chapterOrder.forEach((chId, i) => {
+    const kind = chapterKind(chId);
+    if (kind === 'part') { wrap.appendChild(outlinePartLine(chId)); return; }
+    if (!STORY_KINDS.includes(kind)) return;
+    wrap.appendChild(outlineLine('chapter', chId, null, i, chapterMark(chId),
+      book.chapterNotes[chId] || ''));
+    (book.sectionNotes[chId] || []).forEach((sec, j) => {
+      wrap.appendChild(outlineLine('section', chId, sec.id, j, secLetter(j), sec.text));
+    });
+  });
+
+  const hint = document.createElement('div');
+  hint.className = 'ol-hint';
+  hint.textContent = t('Enter — new chapter (or section, from a section line) · Tab — turn a fresh chapter line into a section · Shift+Tab — turn a section into a chapter · Backspace on an empty line removes it');
+  wrap.appendChild(hint);
+
+  if (focusTarget) {
+    const el = wrap.querySelector(
+      focusTarget.secId
+        ? `.ol-line[data-sec-id="${focusTarget.secId}"] .ol-text`
+        : `.ol-line.ol-chapter[data-ch-id="${focusTarget.chId}"] .ol-text`
+    );
+    if (el) {
+      el.focus();
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      r.collapse(false);
+      const s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+    }
+  }
+}
+
+// a part in the outline: its name and title, over the chapters it holds
+function outlinePartLine(chId) {
+  const line = document.createElement('div');
+  line.className = 'ol-line ol-part';
+  line.dataset.chId = chId;
+  const num = document.createElement('span');
+  num.className = 'ol-num';
+  num.textContent = chapterMark(chId);
+  const name = document.createElement('div');
+  name.className = 'ol-part-name';
+  const title = partTitleOf(chId);
+  name.textContent = chapterName(chId) + (title ? ': ' + title : '');
+  line.append(num, name);
+  line.addEventListener('contextmenu', (e) => { e.preventDefault(); chapterMenu(chId, e.clientX, e.clientY, line); });
+  return line;
+}
+
+// the story entry before this one (pages and parts aren't where sections go)
+function storyBefore(chId) {
+  const order = book.chapterOrder;
+  for (let i = order.indexOf(chId) - 1; i >= 0; i--) if (isStory(order[i])) return order[i];
+  return null;
+}
+
+function outlineLine(kind, chId, secId, index, label, text) {
+  const line = document.createElement('div');
+  line.className = 'ol-line ol-' + kind;
+  line.dataset.chId = chId;
+  if (secId) line.dataset.secId = secId;
+  const num = document.createElement('span');
+  num.className = 'ol-num';
+  num.textContent = label;
+  if (kind === 'chapter' && chapterKind(chId) !== 'chapter') num.title = chapterName(chId);
+  const txt = document.createElement('div');
+  txt.className = 'ol-text';
+  txt.contentEditable = 'true';
+  txt.spellcheck = false;
+  txt.textContent = text;
+
+  const save = () => {
+    const val = txt.textContent.trim();
+    if (kind === 'chapter') {
+      book.chapterNotes[chId] = val;
+    } else {
+      const sec = (book.sectionNotes[chId] || []).find((s) => s.id === secId);
+      if (sec) sec.text = val;
+    }
+    scheduleMetaSave();
+  };
+
+  txt.addEventListener('blur', () => {
+    save();
+    if (kind === 'section') syncGhosts(chId);
+    renderNav();
+  });
+
+  // Enter at the very start of a line that has text makes the new line
+  // ABOVE it (the only way to put something before "A"); anywhere else,
+  // below — the way a text editor's outline behaves
+  const caretAtStart = () => {
+    if (!txt.textContent.trim()) return false;
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0);
+    if (!txt.contains(r.startContainer)) return false;
+    const head = document.createRange();
+    head.selectNodeContents(txt);
+    head.setEnd(r.startContainer, r.startOffset);
+    return head.toString().length === 0;
+  };
+
+  txt.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const above = caretAtStart();
+      save();
+      if (kind === 'chapter') {
+        const at = book.chapterOrder.indexOf(chId) + (above ? 0 : 1);
+        const newId = createChapterAt(at);
+        renderOutline({ chId: newId });
+      } else {
+        const list = book.sectionNotes[chId];
+        const newSec = { id: 'sec-' + Date.now().toString(36), text: '' };
+        list.splice(index + (above ? 0 : 1), 0, newSec);
+        scheduleMetaSave();
+        syncGhosts(chId);
+        renderOutline({ secId: newSec.id });
+      }
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const lines = [...document.querySelectorAll('.ol-line .ol-text')];
+      const next = lines[lines.indexOf(txt) + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (next) {
+        next.focus();
+        const r = document.createRange();
+        r.selectNodeContents(next);
+        r.collapse(false);
+        const s = window.getSelection();
+        s.removeAllRanges(); s.addRange(r);
+      }
+    }
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      if (kind !== 'chapter') return;
+      const prevCh = storyBefore(chId);
+      if (!prevCh) { toast(t('The first line has to be a chapter')); return; }
+      if (countWords(chapterText(chId)) > 0) {
+        toast(t('This chapter already has words in it — only empty chapter lines can become sections'));
+        return;
+      }
+      save();
+      book.sectionNotes[prevCh] = book.sectionNotes[prevCh] || [];
+      const newSec = { id: 'sec-' + Date.now().toString(36), text: txt.textContent.trim() };
+      book.sectionNotes[prevCh].push(newSec);
+      deleteChapterQuiet(chId).then(() => {
+        syncGhosts(prevCh);
+        renderOutline({ secId: newSec.id });
+      });
+    }
+    if (e.key === 'Tab' && e.shiftKey) {
+      e.preventDefault();
+      if (kind !== 'section') return;
+      save();
+      const list = book.sectionNotes[chId];
+      const sec = list.find((s) => s.id === secId);
+      list.splice(list.indexOf(sec), 1);
+      const at = book.chapterOrder.indexOf(chId) + 1;
+      const newId = createChapterAt(at);
+      book.chapterNotes[newId] = sec.text;
+      scheduleMetaSave();
+      syncGhosts(chId);
+      renderOutline({ chId: newId });
+    }
+    if (e.key === 'Backspace' && txt.textContent.trim() === '') {
+      e.preventDefault();
+      if (kind === 'section') {
+        const list = book.sectionNotes[chId] || [];
+        const focus = focusAfterSectionRemoved(list, index, chId);
+        book.sectionNotes[chId] = list.filter((s) => s.id !== secId);
+        scheduleMetaSave();
+        syncGhosts(chId);
+        renderOutline(focus);
+      } else if (book.chapterOrder.filter((c) => isStory(c)).length > 1 && countWords(chapterText(chId)) === 0) {
+        const prevCh = storyBefore(chId) || book.chapterOrder.find((c) => c !== chId && isStory(c));
+        deleteChapterQuiet(chId).then(() => renderOutline({ chId: prevCh }));
+      }
+    }
+    e.stopPropagation();
+  });
+
+  // right-click any outline line to delete it
+  line.addEventListener('contextmenu', async (e) => {
+    e.preventDefault();
+    if (kind === 'chapter') {
+      await chapterMenu(chId, e.clientX, e.clientY, line);
+    } else {
+      const choice = await optionModal(t('Delete this section?'), null,
+        [{ label: t('Delete section'), desc: t('Removes the outline line and its gray ghost from the manuscript. Written prose is never touched.'), danger: true, value: 'delete' }]);
+      if (choice === 'delete') {
+        const list = book.sectionNotes[chId] || [];
+        const focus = focusAfterSectionRemoved(list, index, chId);
+        book.sectionNotes[chId] = list.filter((s) => s.id !== secId);
+        scheduleMetaSave();
+        syncGhosts(chId);
+        renderOutline(focus);
+      }
+    }
+  });
+
+  line.appendChild(num);
+  line.appendChild(txt);
+  return line;
+}
+
+// Push section notes into the manuscript as gray ghost paragraphs,
+// with real *** scene breaks between sections.
+// Once a ghost has been written over, it goes away.
+function syncGhosts(chId) {
+  const body = document.querySelector(`.chapter[data-id="${chId}"] .chapter-body`);
+  if (!body) return;
+  const list = (book.sectionNotes && book.sectionNotes[chId]) || [];
+  const keep = new Set(list.map((s) => s.id));
+
+  const breakFor = (secId) => body.querySelector(`p.scene-break[data-sec-brk="${secId}"]`);
+
+  // 1. Sections deleted from the outline: remove their ghost + its break
+  //    (but never touch paragraphs that have been written over)
+  body.querySelectorAll('p.ghost[data-sec-id]').forEach((p) => {
+    if (!keep.has(p.dataset.secId)) {
+      const brk = breakFor(p.dataset.secId);
+      if (brk) brk.remove();
+      p.remove();
+    }
+  });
+
+  // 2. Pull all still-ghost paragraphs out, then re-append in outline order
+  //    so the ghosts always mirror the outline's sequence
+  for (const p of [...body.querySelectorAll('p.ghost[data-sec-id]')]) {
+    const brk = breakFor(p.dataset.secId);
+    if (brk) brk.remove();
+    p.remove();
+  }
+  for (const sec of list) {
+    // written over already? Leave it alone
+    const written = body.querySelector(`p[data-sec-id="${sec.id}"]:not(.ghost)`);
+    if (written) continue;
+    if (!sec.text) continue;
+    // *** between this ghost and whatever comes before it
+    const hasContent = body.innerText.trim() !== '';
+    if (hasContent && !(body.lastElementChild && body.lastElementChild.classList.contains('scene-break'))) {
+      const brk = document.createElement('p');
+      brk.className = 'scene-break';
+      brk.dataset.secBrk = sec.id;
+      brk.textContent = '***';
+      body.appendChild(brk);
+    }
+    const p = document.createElement('p');
+    p.className = 'ghost';
+    p.dataset.secId = sec.id;
+    p.textContent = sec.text;
+    body.appendChild(p);
+  }
+  syncChapter(body, chId);
+}
+
+let auxDirty = false;
+$('#aux-editor').addEventListener('keydown', (e) => { if (styleKeepScroll(e)) return; smartKeys(e, e.currentTarget); });
+$('#aux-editor').addEventListener('input', () => {
+  auxDirty = true;
+  scheduleAuxSave();
+  if (spellOn) {
+    const key = 'aux-' + ($('#aux-editor').dataset.kind || 'notes');
+    scheduleSpellRescan(key, $('#aux-editor'));
+  }
+});
+// notes paste arrives clean, same as the manuscript
+$('#aux-editor').addEventListener('paste', (e) => {
+  e.preventDefault();
+  const html = e.clipboardData.getData('text/html');
+  const text = e.clipboardData.getData('text/plain');
+  if (html) document.execCommand('insertHTML', false, cleanPasteHtml(html));
+  else if (text) document.execCommand('insertText', false, text.replace(/\r/g, ''));
+});
+function scheduleAuxSave() {
+  clearTimeout(saveTimers.aux);
+  saveTimers.aux = setTimeout(flushAux, 800);
+}
+function flushAux() {
+  if (!auxDirty || !book) return;
+  const kind = $('#aux-editor').dataset.kind;
+  if (kind) window.neo.writeAux(book.id, kind, $('#aux-editor').innerHTML);
+  auxDirty = false;
+}
+
+function renderDarlings() {
+  const wrap = $('#darlings-list');
+  wrap.innerHTML = '';
+  if (darlings.length === 0) {
+    wrap.innerHTML = `<div class="darlings-empty">${t('When a beautiful paragraph is gumming up the works, select it and drag it onto the Darlings tab below.')}<br>${t('It leaves your manuscript but it is never lost.')}</div>`;
+    return;
+  }
+  for (const d of darlings) {
+    const el = document.createElement('div');
+    el.className = 'darling';
+    const content = document.createElement('div');
+    if (d.html) content.innerHTML = d.html;
+    else content.textContent = d.text;
+    const meta = document.createElement('div');
+    meta.className = 'd-meta';
+    const when = fmtDate(d.date);
+    meta.innerHTML = `<span>${t('from {label} · {date} · {n} words', { label: d.chapterLabel, date: when, n: countWords(d.text) })}</span>
+      <span><button class="d-restore">${t('Restore')}</button> <button class="d-del">${t('Delete forever')}</button></span>`;
+    meta.querySelector('.d-restore').onclick = () => restoreDarling(d.id);
+    meta.querySelector('.d-del').onclick = async () => {
+      snapshotStructure('darling delete');
+      // tidy up the invisible anchor the darling left behind
+      const anchor = document.querySelector(`.darling-anchor[data-did="${d.id}"]`);
+      if (anchor) {
+        const body = anchor.closest('.chapter-body');
+        const chId = anchor.closest('.chapter').dataset.id;
+        anchor.remove();
+        syncChapter(body, chId);
+      }
+      darlings = darlings.filter((x) => x.id !== d.id);
+      await window.neo.writeJSON(book.id, 'darlings', darlings);
+      renderDarlings();
+    };
+    el.appendChild(content);
+    el.appendChild(meta);
+    wrap.appendChild(el);
+  }
+}
+
+async function restoreDarling(id) {
+  const d = darlings.find((x) => x.id === id);
+  if (!d) return;
+  snapshotStructure('darling restore');
+  switchTab('manuscript');
+
+  // Preferred: put it back in the exact spot it was cut from, located by
+  // the remembered text surrounding the cut point
+  if (d.chapterId && book.chapterOrder.includes(d.chapterId)) {
+    const body = document.querySelector(`.chapter[data-id="${d.chapterId}"] .chapter-body`);
+    const pos = body ? findDarlingPosition(body, d) : -1;
+    if (body && pos !== -1) {
+      const at = textPosToRange(body, pos);
+      if (at) {
+        let scrollTo = at.startContainer.parentElement?.closest?.('p') || body;
+        if (d.html && /<p[\s>]/i.test(d.html)) {
+          // block content: paragraphs go back in after the host paragraph
+          const holder = document.createElement('div');
+          holder.innerHTML = d.html;
+          let ref = scrollTo === body ? body.lastElementChild : scrollTo;
+          scrollTo = holder.firstElementChild || scrollTo;
+          for (const n of [...holder.childNodes]) { ref.after(n); ref = n; }
+        } else {
+          // inline content: slot it right where the caret was
+          at.insertNode(document.createRange().createContextualFragment(d.html || d.text));
+        }
+        syncChapter(body, d.chapterId);
+        darlings = darlings.filter((x) => x.id !== id);
+        await window.neo.writeJSON(book.id, 'darlings', darlings);
+        scrollTo.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
+        toast(t('Darling restored to its original spot'));
+        return;
+      }
+    }
+  }
+
+  // Fallback: the spot no longer exists — end of its chapter (or the last one)
+  let chId = d.chapterId && book.chapterOrder.includes(d.chapterId)
+    ? d.chapterId
+    : book.chapterOrder[book.chapterOrder.length - 1];
+  if (!chId) { newChapter(); chId = book.chapterOrder[0]; }
+  const body = document.querySelector(`.chapter[data-id="${chId}"] .chapter-body`);
+  const frag = d.html ? d.html : '<p>' + d.text.replace(/\n+/g, '</p><p>') + '</p>';
+  body.insertAdjacentHTML('beforeend', frag);
+  chapterHTML[chId] = captureBody(body);
+  scheduleChapterSave(chId);
+  darlings = darlings.filter((x) => x.id !== id);
+  await window.neo.writeJSON(book.id, 'darlings', darlings);
+  focusChapter(chId);
+  toast(t('Original spot is gone — restored to the end of {label}', { label: d.chapterLabel || t('the manuscript') }));
+}

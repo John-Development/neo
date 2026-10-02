@@ -1,0 +1,31 @@
+// ---------- state ----------
+let library = null;          // library.json
+let book = null;             // current book.json
+let chapterHTML = {};        // chapterId -> html (loaded at open)
+let savedHTML = {};          // chapterId -> html as last read from / written to disk
+let savedMetaSig = '';       // book.json as last read/written, minus the volatile bits
+let diskStamps = {};         // chapterId -> file mtime as of the last look at the disk
+let writing = {};            // chapterId -> chapter writes still on their way to disk
+let stickies = [];           // [{id, chapterId, text, resolved}]
+let darlings = [];           // [{id, html, text, chapterId, chapterLabel, date}]
+let currentTab = 'manuscript';
+let currentChapterId = null; // chapter the caret/scroll is in
+let wordMode = 'book';       // 'book' | 'chapter'
+let saveTimers = {};
+// ------ other state --------
+let wordCache = {};
+let libraryGeneration = 0;
+let libraryWritesPending = 0;
+let wordSegmenter = null;
+let wordSegmenterLang = '';
+let justBoundId = null; // the shelf whose binding the next drawing shows
+let _dropInd = null;
+let shelfScrollDir = 0;
+let shelfScrollRAF = null;
+let lastShelfMove = null;
+let undoStack = [];
+let lastHereActivity = 0;
+let zoomSaveTimer = null;
+let focusBeforeDialog = null;
+let pagePlace = null; // where the caret was when the keyboard left the page
+let libraryDirPath = "";
