@@ -1,5 +1,5 @@
 /* ================================================================== */
-/*  FIND & REPLACE                                                     */
+/*  FIND & REPLACE                                                    */
 /* ================================================================== */
 
 let searchState = { matches: [], idx: -1, query: '' };
@@ -146,33 +146,33 @@ function replaceAllMatches() {
   runSearch();
 }
 
-$('#search-input').addEventListener('input', () => {
-  clearTimeout(saveTimers.search);
-  saveTimers.search = setTimeout(runSearch, 250);
-});
-$('#search-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); freshSearchIfStale(); gotoMatch(searchState.idx + (e.shiftKey ? -1 : 1)); }
-  if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
-  if (e.key === 'Tab' && !e.shiftKey) {
-    const m = searchState.matches[Math.max(0, searchState.idx)];
-    if (m) {
-      e.preventDefault();
-      const sel = window.getSelection();
-      const r = m.range.cloneRange();
-      r.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(r);
-      const body = m.range.startContainer.parentElement.closest('[contenteditable="true"]');
-      if (body) body.focus();
-    }
-  }
-});
-$('#replace-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); replaceCurrent(); }
-  if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
-});
-$('#search-next').onclick = () => { freshSearchIfStale(); gotoMatch(searchState.idx + 1); };
-$('#search-prev').onclick = () => { freshSearchIfStale(); gotoMatch(searchState.idx - 1); };
-$('#replace-one').onclick = replaceCurrent;
-$('#replace-all').onclick = replaceAllMatches;
-$('#search-close').onclick = closeSearch;
+// $('#search-input').addEventListener('input', () => {
+//   clearTimeout(saveTimers.search);
+//   saveTimers.search = setTimeout(runSearch, 250);
+// });
+// $('#search-input').addEventListener('keydown', (e) => {
+//   if (e.key === 'Enter') { e.preventDefault(); freshSearchIfStale(); gotoMatch(searchState.idx + (e.shiftKey ? -1 : 1)); }
+//   if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
+//   if (e.key === 'Tab' && !e.shiftKey) {
+//     const m = searchState.matches[Math.max(0, searchState.idx)];
+//     if (m) {
+//       e.preventDefault();
+//       const sel = window.getSelection();
+//       const r = m.range.cloneRange();
+//       r.collapse(false);
+//       sel.removeAllRanges();
+//       sel.addRange(r);
+//       const body = m.range.startContainer.parentElement.closest('[contenteditable="true"]');
+//       if (body) body.focus();
+//     }
+//   }
+// });
+// $('#replace-input').addEventListener('keydown', (e) => {
+//   if (e.key === 'Enter') { e.preventDefault(); replaceCurrent(); }
+//   if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
+// });
+// $('#search-next').onclick = () => { freshSearchIfStale(); gotoMatch(searchState.idx + 1); };
+// $('#search-prev').onclick = () => { freshSearchIfStale(); gotoMatch(searchState.idx - 1); };
+// $('#replace-one').onclick = replaceCurrent;
+// $('#replace-all').onclick = replaceAllMatches;
+// $('#search-close').onclick = closeSearch;

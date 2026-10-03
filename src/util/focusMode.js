@@ -1,6 +1,7 @@
 /* ================================================================== */
-/*  FOCUS MODE: dim everything but the sentence or paragraph           */
+/*  FOCUS MODE: dim everything but the sentence or paragraph          */
 /* ================================================================== */
+
 // Painted with the CSS Custom Highlight API (like search and spellcheck),
 // so the manuscript DOM is never touched and nothing leaks into saved HTML.
 // also the order ⌘⇧O steps through: off → paragraph → sentence → off
@@ -113,11 +114,11 @@ function updateFocus() {
 }
 function isBreakPara(p) { return p.classList.contains('scene-break'); }
 
-document.addEventListener('selectionchange', () => {
-  if (focusLevel === 'off') return;
-  requestAnimationFrame(() => { try { updateFocus(); } catch { /* mid-mutation */ } });
-});
-document.addEventListener('input', () => {
-  if (focusLevel === 'off') return;
-  requestAnimationFrame(() => { try { updateFocus(); } catch { /* mid-mutation */ } });
-});
+// document.addEventListener('selectionchange', () => {
+//   if (focusLevel === 'off') return;
+//   requestAnimationFrame(() => { try { updateFocus(); } catch { /* mid-mutation */ } });
+// });
+// document.addEventListener('input', () => {
+//   if (focusLevel === 'off') return;
+//   requestAnimationFrame(() => { try { updateFocus(); } catch { /* mid-mutation */ } });
+// });

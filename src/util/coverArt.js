@@ -1,5 +1,5 @@
 /* ================================================================== */
-/*  COVER ART SETTINGS (File → Cover Art…)                             */
+/*  COVER ART SETTINGS (File → Cover Art…)                            */
 /* ================================================================== */
 
 // One key per provider. The brief and the painting always come from the
@@ -187,4 +187,4 @@ function openStats() {
   }
 }
 
-$('#goal-counter').onclick = openStats;
+// $('#goal-counter').onclick = openStats;

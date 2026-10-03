@@ -1,5 +1,5 @@
 /* ================================================================== */
-/*  SPELLCHECK PASS + TYPEWRITER SCROLLING                             */
+/*  SPELLCHECK PASS + TYPEWRITER SCROLLING                            */
 /* ================================================================== */
 
 /* NEO's own spellcheck pass: a bundled dictionary (via the main process),
@@ -215,83 +215,6 @@ async function changeSpellLanguage(code) {
   toast(t('Spellcheck: {lang}', { lang: SPELL_LANGUAGE_NAMES[code] || code }));
 }
 
-// right-click a flagged word for suggestions
-document.addEventListener('contextmenu', async (e) => {
-  if (!spellOn) return;
-  const editor = e.target.closest && e.target.closest('.chapter-body, #aux-editor');
-  if (!editor) return;
-  const pos = document.caretRangeFromPoint(e.clientX, e.clientY);
-  if (!pos || pos.startContainer.nodeType !== Node.TEXT_NODE) return;
-  const node = pos.startContainer;
-  const text = node.data;
-  // a capital slip (see capitalSlips): the letter's capital, and nothing to learn
-  let ws = pos.startOffset;
-  while (ws > 0 && /[\p{L}\p{M}]/u.test(text[ws - 1])) ws--;
-  for (const list of capsRanges.values()) {
-    const hit = list.find((r) => r.startContainer === node && r.startOffset === ws);
-    if (!hit) continue;
-    e.preventDefault();
-    const at = hit.startOffset;
-    const upper = text[at].toLocaleUpperCase(writingLanguage());
-    const chEl = editor.closest('.chapter');
-    showSpellMenu(e.clientX, e.clientY, text[at], [upper], {
-      replace: (s) => {
-        const sel = window.getSelection();
-        const r = document.createRange();
-        r.setStart(node, at); r.setEnd(node, at + 1);
-        sel.removeAllRanges(); sel.addRange(r);
-        document.execCommand('insertText', false, s);
-        if (chEl) spellScanEl(spellElFor(chEl.dataset.id), chEl.dataset.id);
-      }
-    });
-    return;
-  }
-  const isW = (c) => /[\p{L}\p{M}'’]/u.test(c);
-  let a = pos.startOffset, b = pos.startOffset;
-  while (a > 0 && isW(text[a - 1])) a--;
-  while (b < text.length && isW(text[b])) b++;
-  if (a === b) return;
-  let word = spellNorm(text.slice(a, b));
-  if (spellCache.get(word) !== false) {
-    // …or a hyphenated word underlined whole: every piece is a word, the
-    // whole isn't (see spellScanEl)
-    let wa = a, wb = b;
-    while (text[wa - 1] === '-' && isW(text[wa - 2] || '')) { wa--; while (wa > 0 && isW(text[wa - 1])) wa--; }
-    while (text[wb] === '-' && isW(text[wb + 1] || '')) { wb++; while (wb < text.length && isW(text[wb])) wb++; }
-    const whole = spellNorm(text.slice(wa, wb));
-    if (whole === word || spellCache.get(whole) !== false) return; // only flagged words get our menu
-    if (text.slice(wa, wb).split('-').some((w) => spellCache.get(spellNorm(w)) === false)) return;
-    a = wa; b = wb; word = whole;
-  }
-  e.preventDefault();
-  const chEl = editor.closest ? editor.closest('.chapter') : null;
-  const key = editor.id === 'aux-editor'
-    ? 'aux-' + (editor.dataset.kind || 'notes')
-    : (chEl ? chEl.dataset.id : null);
-  const sugg = await window.neo.spellSuggest(word);
-  showSpellMenu(e.clientX, e.clientY, word, sugg, {
-    replace: (s) => {
-      const sel = window.getSelection();
-      const r = document.createRange();
-      r.setStart(node, a); r.setEnd(node, b);
-      sel.removeAllRanges(); sel.addRange(r);
-      document.execCommand('insertText', false, s);
-      if (key) spellScanEl(spellElFor(key), key);
-    },
-    learn: async () => {
-      library.customWords = library.customWords || [];
-      if (!library.customWords.includes(word)) library.customWords.push(word);
-      await writeLibrary(library);
-      await window.neo.spellLearn(word);
-      // Learning also accepts equivalent Unicode spellings. Recheck cached
-      // failures so those variants lose their underlines in every editor.
-      spellCache.clear();
-      spellCache.set(word, true);
-      for (const k of [...spellScanned]) spellScanEl(spellElFor(k), k);
-    }
-  });
-});
-
 function showSpellMenu(x, y, word, suggestions, actions) {
   document.querySelector('.spell-menu')?.remove();
   const menu = document.createElement('div');
@@ -353,8 +276,8 @@ function typewriterRoom() {
   const room = $('#paper-scroll').clientHeight - window.innerHeight * 0.45 - below + line;
   paper.style.setProperty('--typewriter-room', Math.max(120, Math.ceil(room)) + 'px');
 }
-new ResizeObserver(() => typewriterRoom()).observe($('#chapters'));
-window.addEventListener('resize', typewriterRoom);
+// new ResizeObserver(() => typewriterRoom()).observe($('#chapters'));
+// window.addEventListener('resize', typewriterRoom);
 function toggleTypewriter() {
   typewriterEnabled = !typewriterEnabled;
   library.typewriter = typewriterEnabled;
@@ -369,30 +292,30 @@ function toggleTypewriter() {
 // it was. The caret has a band of a few lines to move in before the page
 // glides (not snaps) to bring it back to the writing height.
 let typewriterByKeyboard = false;
-document.addEventListener('keydown', (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const el = e.target;
-  if (el && el.closest && el.closest('.chapter-body')) typewriterByKeyboard = true;
-}, true);
-document.addEventListener('mousedown', () => { typewriterByKeyboard = false; }, true);
+// document.addEventListener('keydown', (e) => {
+//   if (e.metaKey || e.ctrlKey || e.altKey) return;
+//   const el = e.target;
+//   if (el && el.closest && el.closest('.chapter-body')) typewriterByKeyboard = true;
+// }, true);
+// document.addEventListener('mousedown', () => { typewriterByKeyboard = false; }, true);
 
-document.addEventListener('selectionchange', () => {
-  if (!typewriterEnabled || !book || currentTab !== 'manuscript' || !typewriterByKeyboard) return;
-  const sel = window.getSelection();
-  if (!sel.rangeCount || !sel.isCollapsed) return;
-  let el = sel.anchorNode;
-  if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
-  if (!el || !el.closest || !el.closest('.chapter-body')) return;
-  requestAnimationFrame(() => {
-    try {
-      let rect = sel.getRangeAt(0).getBoundingClientRect();
-      if (!rect || (rect.top === 0 && rect.height === 0)) rect = el.getBoundingClientRect();
-      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 30;
-      const diff = rect.top - window.innerHeight * 0.45;
-      // a band of about three lines around the writing height
-      if (Math.abs(diff) <= lineHeight * 1.5) return;
-      const scroller = $('#paper-scroll');
-      scroller.scrollTo({ top: scroller.scrollTop + diff, behavior: scrollBehavior() });
-    } catch { /* selection mid-mutation; skip this frame */ }
-  });
-});
+// document.addEventListener('selectionchange', () => {
+//   if (!typewriterEnabled || !book || currentTab !== 'manuscript' || !typewriterByKeyboard) return;
+//   const sel = window.getSelection();
+//   if (!sel.rangeCount || !sel.isCollapsed) return;
+//   let el = sel.anchorNode;
+//   if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+//   if (!el || !el.closest || !el.closest('.chapter-body')) return;
+//   requestAnimationFrame(() => {
+//     try {
+//       let rect = sel.getRangeAt(0).getBoundingClientRect();
+//       if (!rect || (rect.top === 0 && rect.height === 0)) rect = el.getBoundingClientRect();
+//       const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 30;
+//       const diff = rect.top - window.innerHeight * 0.45;
+//       // a band of about three lines around the writing height
+//       if (Math.abs(diff) <= lineHeight * 1.5) return;
+//       const scroller = $('#paper-scroll');
+//       scroller.scrollTo({ top: scroller.scrollTop + diff, behavior: scrollBehavior() });
+//     } catch { /* selection mid-mutation; skip this frame */ }
+//   });
+// });

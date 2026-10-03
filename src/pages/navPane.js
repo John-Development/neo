@@ -1,7 +1,8 @@
 /* ================================================================== */
-/*  NAV PANE                                                           */
+/*  NAV PANE                                                          */
 /* ================================================================== */
 
+// State
 let chapterDragActive = false;
 let navRefreshPending = false;
 
@@ -223,28 +224,28 @@ function storyEnd() {
   while (at > 0 && BACK_KINDS.includes(chapterKind(order[at - 1]))) at--;
   return at;
 }
-$('#nav-add').onclick = () => {
-  switchTab('manuscript');
-  focusChapter(createChapterAt(storyEnd()));
-};
+// $('#nav-add').onclick = () => {
+//   switchTab('manuscript');
+//   focusChapter(createChapterAt(storyEnd()));
+// };
 
 // drop target for chapter reordering, with a gold line showing the landing spot
 const navList = $('#nav-list');
-// the + on the seam nearest the pointer, when it's near one (the pane
-// listens, so the seams above the first box and below the last wake too)
-$('#nav-pane').addEventListener('mousemove', (e) => {
-  if (chapterDragActive || e.buttons) return;
-  let near = null;
-  let best = 9;
-  for (const g of navList.querySelectorAll('.nav-gap')) {
-    const d = Math.abs(e.clientY - g.getBoundingClientRect().top);
-    if (d < best) { best = d; near = g; }
-  }
-  for (const g of navList.querySelectorAll('.nav-gap')) g.classList.toggle('near', g === near);
-});
-$('#nav-pane').addEventListener('mouseleave', () => {
-  navList.querySelectorAll('.nav-gap.near').forEach((g) => g.classList.remove('near'));
-});
+// // the + on the seam nearest the pointer, when it's near one (the pane
+// // listens, so the seams above the first box and below the last wake too)
+// $('#nav-pane').addEventListener('mousemove', (e) => {
+//   if (chapterDragActive || e.buttons) return;
+//   let near = null;
+//   let best = 9;
+//   for (const g of navList.querySelectorAll('.nav-gap')) {
+//     const d = Math.abs(e.clientY - g.getBoundingClientRect().top);
+//     if (d < best) { best = d; near = g; }
+//   }
+//   for (const g of navList.querySelectorAll('.nav-gap')) g.classList.toggle('near', g === near);
+// });
+// $('#nav-pane').addEventListener('mouseleave', () => {
+//   navList.querySelectorAll('.nav-gap.near').forEach((g) => g.classList.remove('near'));
+// });
 function finishChapterDrag(e) {
   if (!chapterDragActive) return;
   chapterDragActive = false;
@@ -260,10 +261,10 @@ function finishChapterDrag(e) {
   }
   if (navRefreshPending) renderNav();
 }
-// Drop also cleans up if rendering removes the source before dragend bubbles.
-// Dragend covers Escape and releases outside a valid drop target.
-document.addEventListener('drop', finishChapterDrag);
-document.addEventListener('dragend', finishChapterDrag);
+// // Drop also cleans up if rendering removes the source before dragend bubbles.
+// // Dragend covers Escape and releases outside a valid drop target.
+// document.addEventListener('drop', finishChapterDrag);
+// document.addEventListener('dragend', finishChapterDrag);
 
 function navDropInd() {
   let ind = document.querySelector('.nav-drop-ind');
@@ -273,50 +274,50 @@ function navDropInd() {
   }
   return ind;
 }
-navList.addEventListener('dragover', (e) => {
-  if (!e.dataTransfer.types.includes('application/x-neo-chapter')) return;
-  e.preventDefault();
-  const ind = navDropInd();
-  const items = [...navList.querySelectorAll('.nav-item:not(.dragging)')];
-  let placed = false;
-  for (const it of items) {
-    const r = it.getBoundingClientRect();
-    if (e.clientY < r.top + r.height / 2) {
-      navList.insertBefore(ind, it);
-      placed = true;
-      break;
-    }
-  }
-  if (!placed) navList.appendChild(ind);
-});
-navList.addEventListener('dragleave', (e) => {
-  if (navList.contains(e.relatedTarget)) return;
-  const ind = document.querySelector('.nav-drop-ind');
-  if (ind) ind.remove();
-});
-navList.addEventListener('drop', async (e) => {
-  const chId = e.dataTransfer.getData('application/x-neo-chapter');
-  if (!chId) return;
-  e.preventDefault();
-  const ind = document.querySelector('.nav-drop-ind');
-  let index = book.chapterOrder.filter((c) => c !== chId).length;
-  if (ind) {
-    index = 0;
-    for (const c of navList.children) {
-      if (c === ind) break;
-      if (c.classList.contains('nav-item') && !c.classList.contains('dragging')) index++;
-    }
-    ind.remove();
-  }
-  const from = book.chapterOrder.indexOf(chId);
-  if (from === -1) return;
-  snapshotStructure('chapter reorder');
-  book.chapterOrder = book.chapterOrder.filter((c) => c !== chId);
-  book.chapterOrder.splice(index, 0, chId);
-  await saveMeta();
-  renderChapters(); // renumbers heads and rebuilds the nav
-  if (currentTab === 'outline') renderOutline();
-});
+// navList.addEventListener('dragover', (e) => {
+//   if (!e.dataTransfer.types.includes('application/x-neo-chapter')) return;
+//   e.preventDefault();
+//   const ind = navDropInd();
+//   const items = [...navList.querySelectorAll('.nav-item:not(.dragging)')];
+//   let placed = false;
+//   for (const it of items) {
+//     const r = it.getBoundingClientRect();
+//     if (e.clientY < r.top + r.height / 2) {
+//       navList.insertBefore(ind, it);
+//       placed = true;
+//       break;
+//     }
+//   }
+//   if (!placed) navList.appendChild(ind);
+// });
+// navList.addEventListener('dragleave', (e) => {
+//   if (navList.contains(e.relatedTarget)) return;
+//   const ind = document.querySelector('.nav-drop-ind');
+//   if (ind) ind.remove();
+// });
+// navList.addEventListener('drop', async (e) => {
+//   const chId = e.dataTransfer.getData('application/x-neo-chapter');
+//   if (!chId) return;
+//   e.preventDefault();
+//   const ind = document.querySelector('.nav-drop-ind');
+//   let index = book.chapterOrder.filter((c) => c !== chId).length;
+//   if (ind) {
+//     index = 0;
+//     for (const c of navList.children) {
+//       if (c === ind) break;
+//       if (c.classList.contains('nav-item') && !c.classList.contains('dragging')) index++;
+//     }
+//     ind.remove();
+//   }
+//   const from = book.chapterOrder.indexOf(chId);
+//   if (from === -1) return;
+//   snapshotStructure('chapter reorder');
+//   book.chapterOrder = book.chapterOrder.filter((c) => c !== chId);
+//   book.chapterOrder.splice(index, 0, chId);
+//   await saveMeta();
+//   renderChapters(); // renumbers heads and rebuilds the nav
+//   if (currentTab === 'outline') renderOutline();
+// });
 
 function highlightNav() {
   $$('.nav-item').forEach((el) => el.classList.toggle('current', el.dataset.id === currentChapterId));
@@ -355,18 +356,18 @@ function closeUnpinnedPanes() {
   if (!chapterDragActive && $('#nav-pane').dataset.pinned !== '1') $('#nav-pane').classList.remove('open');
   if ($('#side-pane').dataset.pinned !== '1') $('#side-pane').classList.remove('open');
 }
-document.documentElement.addEventListener('mouseleave', closeUnpinnedPanes);
-window.addEventListener('blur', closeUnpinnedPanes);
+// document.documentElement.addEventListener('mouseleave', closeUnpinnedPanes);
+// window.addEventListener('blur', closeUnpinnedPanes);
 
-// the wheel scrolls the manuscript even when the pointer floats over the
-// dark margins beside the (narrower) page column
-$('#editor-view').addEventListener('wheel', (e) => {
-  const scroller = $('#paper-scroll');
-  if (e.ctrlKey) return; // pinch-zoom gesture, not a scroll
-  if (scroller.contains(e.target)) return; // native scrolling handles it
-  if ($('#nav-pane').contains(e.target) || $('#side-pane').contains(e.target)) return;
-  scroller.scrollTop += e.deltaY;
-}, { passive: true });
+// // the wheel scrolls the manuscript even when the pointer floats over the
+// // dark margins beside the (narrower) page column
+// $('#editor-view').addEventListener('wheel', (e) => {
+//   const scroller = $('#paper-scroll');
+//   if (e.ctrlKey) return; // pinch-zoom gesture, not a scroll
+//   if (scroller.contains(e.target)) return; // native scrolling handles it
+//   if ($('#nav-pane').contains(e.target) || $('#side-pane').contains(e.target)) return;
+//   scroller.scrollTop += e.deltaY;
+// }, { passive: true });
 
 // Keep Open, on either pane: the page moves over to make room, and the
 // choice stays for next time (on this computer)
@@ -384,12 +385,12 @@ function pinPane(side, on) {
     localStorage.setItem('neo-pinned-panes', JSON.stringify(kept));
   } catch { /* fine: it just won't be remembered */ }
 }
-$('#side-pin').onclick = () => pinPane('side', $('#side-pane').dataset.pinned !== '1');
-$('#nav-pin').onclick = () => pinPane('nav', $('#nav-pane').dataset.pinned !== '1');
-if (!NO_HOVER) {
-  try {
-    const kept = JSON.parse(localStorage.getItem('neo-pinned-panes') || '{}');
-    if (kept.nav) pinPane('nav', true);
-    if (kept.side) pinPane('side', true);
-  } catch { /* nothing kept */ }
-}
+// $('#side-pin').onclick = () => pinPane('side', $('#side-pane').dataset.pinned !== '1');
+// $('#nav-pin').onclick = () => pinPane('nav', $('#nav-pane').dataset.pinned !== '1');
+// if (!NO_HOVER) {
+//   try {
+//     const kept = JSON.parse(localStorage.getItem('neo-pinned-panes') || '{}');
+//     if (kept.nav) pinPane('nav', true);
+//     if (kept.side) pinPane('side', true);
+//   } catch { /* nothing kept */ }
+// }

@@ -220,6 +220,76 @@ function poetryUnderHeading(body, chId) {
   breakRun++;
 }
 
+// Backspace at the very start of a poetry or flush paragraph makes it prose
+// again — the second Backspace then merges it upward like any paragraph
+function poetryBackspace(e, body, chId) {
+  if (e.key !== 'Backspace' || e.metaKey || e.ctrlKey || e.altKey) return false;
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return false;
+  const block = caretBlock(body);
+  if (!block || !(block.classList.contains('poetry') || block.classList.contains('flush'))) return false;
+  const r = sel.getRangeAt(0);
+  const head = document.createRange();
+  head.selectNodeContents(block);
+  try { head.setEnd(r.startContainer, r.startOffset); } catch { return false; }
+  if (head.toString().length !== 0) return false;
+  e.preventDefault();
+  snapshotStructure('poetry paragraph to prose');
+  if (block.classList.contains('poetry')) romanize(block);
+  block.classList.remove('poetry', 'flush');
+  placeCaret(block, 0);
+  syncChapter(body, chId);
+  resetNativeUndo();
+  breakRun++;
+  return true;
+}
+
+// Format → Poetry Paragraph / Flush Paragraph: toggles every paragraph the
+// selection touches (a paragraph is one or the other, or plain prose)
+function togglePoetry() { toggleParaKind('poetry'); }
+function toggleFlush() { toggleParaKind('flush'); }
+function toggleParaKind(kind) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) { toast(t('Click into a paragraph first')); return; }
+  const r = sel.getRangeAt(0);
+  let el = r.startContainer;
+  if (el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+  const body = el && el.closest ? el.closest('.chapter-body') : null;
+  if (!body) { toast(t('Click into a paragraph first')); return; }
+  const chId = body.closest('.chapter').dataset.id;
+  const ps = [...body.querySelectorAll('p')].filter(
+    (p) => r.intersectsNode(p) && !p.classList.contains('scene-break')
+  );
+  if (!ps.length) return;
+  snapshotStructure(kind + ' paragraph');
+  const on = !ps.every((p) => p.classList.contains(kind));
+  for (const p of ps) {
+    const wasPoetry = p.classList.contains('poetry');
+    p.classList.remove('poetry', 'flush');
+    if (on) p.classList.add(kind);
+    if (kind === 'poetry' && on) italicize(p);
+    else if (wasPoetry) romanize(p);
+  }
+  caretIntoStart(ps[0]);
+  syncChapter(body, chId);
+  resetNativeUndo();
+  breakRun++;
+}
+
+// ⇧Enter from the chapter title: a poetry paragraph above the opening one
+function poetryUnderHeading(body, chId) {
+  const line = document.createElement('p');
+  line.className = 'poetry';
+  italicize(line);
+  snapshotStructure('poetry paragraph');
+  body.prepend(line);
+  body.focus();
+  caretIntoStart(line);
+  syncChapter(body, chId);
+  resetNativeUndo();
+  breakRun++;
+}
+
 // Backspace just below a *** (or Delete just above one) removes the break
 // itself — prose never merges into the break's styled paragraph
 function sceneBreakDelete(e, body, chId) {
@@ -298,47 +368,6 @@ let lastCaretPara = null;
 let capOffBody = null;
 let menuPoetryState = false;
 let menuFlushState = false;
-document.addEventListener('selectionchange', () => {
-  if (!book || currentTab !== 'manuscript') return;
-  const sel = window.getSelection();
-  let caretP = null;
-  if (sel && sel.rangeCount) {
-    let el = sel.anchorNode;
-    if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
-    const p = el && el.closest ? el.closest('p') : null;
-    if (p && p.parentElement && p.parentElement.classList.contains('chapter-body')) caretP = p;
-  }
-  if (caretP !== lastCaretPara) {
-    if (lastCaretPara && lastCaretPara.isConnected) {
-      try { lastCaretPara.normalize(); } catch { /* fine */ }
-    }
-    lastCaretPara = caretP;
-  }
-  // during a spellcheck pass, each chapter scans as the caret arrives
-  if (spellOn && caretP) {
-    const ch = caretP.closest('.chapter');
-    if (ch) scanSpellingIn(ch.querySelector('.chapter-body'), ch.dataset.id);
-  }
-  // the drop cap steps aside while the caret is in the first paragraph
-  const inPoetry = !!(caretP && caretP.classList.contains('poetry'));
-  if (inPoetry !== menuPoetryState && window.neo.poetryState) {
-    menuPoetryState = inPoetry;
-    window.neo.poetryState(inPoetry);
-  }
-  const inFlush = !!(caretP && caretP.classList.contains('flush'));
-  if (inFlush !== menuFlushState && window.neo.flushState) {
-    menuFlushState = inFlush;
-    window.neo.flushState(inFlush);
-  }
-  const inFirst = caretP && caretP.parentElement &&
-    caretP.hasAttribute('data-first');
-  const capBody = inFirst ? caretP.parentElement : null;
-  if (capBody !== capOffBody) {
-    if (capOffBody && capOffBody.isConnected) capOffBody.classList.remove('cap-off');
-    if (capBody) capBody.classList.add('cap-off');
-    capOffBody = capBody;
-  }
-});
 
 // Does the caret sit at the start or the end of its paragraph, or after a
 // space? What's pasted there opens or ends the paragraph only if so.
@@ -570,19 +599,6 @@ function markdownInline(line) {
   html = html.replace(/(^|[^~\\])~~(?![\s~])(.+?)(?<![\s\\~])~~(?!~)/gu, '$1<s>$2</s>');
   return html === before ? null : html;
 }
-// ⌘Z (Ctrl+Z) right after: the styling goes and the marks come back as typed
-document.addEventListener('keydown', (e) => {
-  if (MODIFIER_KEYS.has(e.key)) return; // the ⌘ or Ctrl of ⌘Z, on its way
-  const just = mdJustSet;
-  mdJustSet = null;
-  if (!just || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ') return;
-  e.preventDefault();
-  e.stopPropagation();
-  for (let i = 0; i < just.steps; i++) document.execCommand('undo');
-  // the text is back as it was typed; the mark that was about to close it goes in
-  if (just.block.isConnected) selectChars(just.block, just.end, just.end);
-  document.execCommand('insertText', false, just.key);
-}, true);
 
 // Dialogue dashes as you type (see dialogueDashEdits): a hyphen turns once
 // the key after it shows what it is. The key then goes on as usual, so a
@@ -616,19 +632,6 @@ function dialogueDashKey(e, body) {
   document.execCommand('insertText', false, edit.to);
   if (key) dashJustSet = { block, at, was: edit.from, to: edit.to, key };
 }
-// ⌘Z (Ctrl+Z) right after: the hyphen comes back as typed
-document.addEventListener('keydown', (e) => {
-  if (MODIFIER_KEYS.has(e.key)) return; // the ⌘ or Ctrl of ⌘Z, on its way
-  const just = dashJustSet;
-  dashJustSet = null;
-  if (!just || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ' || !just.block.isConnected) return;
-  e.preventDefault();
-  e.stopPropagation();
-  selectChars(just.block, just.at, just.at + just.to.length);
-  document.execCommand('insertText', false, just.was);
-  const caret = just.at + just.was.length + just.key.length;
-  selectChars(just.block, caret, caret);
-}, true);
 
 // Swap the last n typed characters for text. They are selected and typed
 // over, so the new text takes their styling: deleting them first leaves the
@@ -639,22 +642,6 @@ function replaceBefore(n, text) {
   for (let i = 0; i < n; i++) sel.modify('extend', 'backward', 'character');
   document.execCommand('insertText', false, text);
 }
-
-// TODO: move to app.js
-// ⌘Z (Ctrl+Z) right after: the lowercase comes back as typed
-document.addEventListener('keydown', (e) => {
-  if (MODIFIER_KEYS.has(e.key)) return; // the ⌘ or Ctrl of ⌘Z, on its way
-  const just = capJustSet;
-  capJustSet = null;
-  if (!just || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ' || !just.block.isConnected) return;
-  e.preventDefault();
-  e.stopPropagation();
-  selectChars(just.block, just.at, just.at + 1);
-  document.execCommand('insertText', false, just.was);
-  // a key typed after the "i" stays, with the caret past it
-  const caret = just.at + 1 + just.key.length;
-  selectChars(just.block, caret, caret);
-}, true);
 
 // Capitals as you type, in the manuscript: a sentence's first letter (at a
 // paragraph's start, or after a full stop that isn't an ellipsis or an
@@ -901,18 +888,6 @@ function frenchTypography() {
   return /^fr-CA$/i.test(NeoI18n.getLocale()) ? 'ca' : 'fr';
 }
 
-// Titles, outline lines, notes and shelf names get the same typography as
-// the manuscript (which calls smartKeys itself). Capture phase, because
-// those fields keep their keystrokes from bubbling to the page.
-document.addEventListener('keydown', (e) => {
-  const el = e.target;
-  if (e.defaultPrevented || !el || !el.isContentEditable || el.closest('.chapter-body')) return;
-  smartKeys(e, el);
-}, true);
-
-// Title page: Enter drops you into Chapter One.
-$('#tp-title').addEventListener('keydown', titleEnter);
-$('#tp-subtitle').addEventListener('keydown', titleEnter);
 function titleEnter(e) {
   if (e.key !== 'Enter') return;
   e.preventDefault();
@@ -921,19 +896,6 @@ function titleEnter(e) {
   if (first) focusChapter(first);
   else focusChapter(createChapterAt(storyEnd()));
 }
-$('#tp-title').addEventListener('input', () => {
-  book.title = $('#tp-title').textContent.trim() || t('Untitled');
-  scheduleMetaSave();
-});
-$('#tp-subtitle').addEventListener('input', () => {
-  book.subtitle = $('#tp-subtitle').textContent.trim();
-  scheduleMetaSave();
-});
-// each book can carry its own pen name
-$('#tp-author').addEventListener('input', () => {
-  book.author = $('#tp-author').textContent.trim();
-  scheduleMetaSave();
-});
 
 // Which logical shortcut a keyboard event means.
 //
@@ -960,61 +922,3 @@ function isHelpShortcut(e) {
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return false;
   return e.key === '/' || e.key === '?';
 }
-
-// Global editor shortcuts
-document.addEventListener('keydown', (e) => {
-  if ($('#editor-view').hidden) return;
-  if (document.querySelector('.modal-backdrop:not([hidden])')) return; // visible modals own the keyboard
-  const cmd = e.metaKey || e.ctrlKey;
-  if (cmd && e.shiftKey && e.code === 'KeyX') {
-    e.preventDefault();
-    if (currentTab === 'manuscript') insertPlaceholder();
-  }
-  if (cmd && e.shiftKey && e.code === 'KeyD') {
-    e.preventDefault();
-    if (currentTab === 'manuscript') darlingFromKeyboard();
-  }
-  if (isSpellcheckShortcut(e)) {
-    e.preventDefault();
-    toggleSpellcheck();
-  }
-  // The text-size pair keeps the menu's own keys on the layouts where they
-  // match, and takes over by character where they do not (`+` is Shift+1 on
-  // Swiss German, so CmdOrCtrl-Plus never fires there).
-  if (isLargerTextShortcut(e)) {
-    e.preventDefault();
-    void setEditorFontSize(1);
-  }
-  if (isSmallerTextShortcut(e)) {
-    e.preventDefault();
-    void setEditorFontSize(-1);
-  }
-  if (e.key === 'Escape') {
-    if (!$('#searchbar').hidden) closeSearch();
-    else window.neo.fullscreenEscape().then((exited) => { if (!exited) backToShelf(); });
-  }
-});
-
-// The help character works on every layout, editor or shelf: ⌘/ needs Shift+7
-// on Swiss German, which the bare-character accelerator cannot name, so the
-// renderer catches the character the layout produced.
-document.addEventListener('keydown', (e) => {
-  if (!isHelpShortcut(e)) return;
-  e.preventDefault();
-  showHelp();
-});
-
-// ⌥⌘↓ / ⌥⌘↑ (Ctrl+Alt on Windows and Linux): next or previous chapter.
-// No menu item carries these any more, so the window catches them itself —
-// first, before the page or the outline can read them as plain arrows.
-// Pocket takes both: a keyboard paired with a phone or an iPad may be a
-// Mac's (⌘ arrives as Meta) or a PC's (Ctrl).
-window.addEventListener('keydown', (e) => {
-  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-  const cmd = IS_POCKET ? (e.metaKey !== e.ctrlKey) : (IS_MAC ? e.metaKey : e.ctrlKey);
-  if (!cmd || !e.altKey || e.shiftKey) return;
-  if ($('#editor-view').hidden || document.querySelector('.modal-backdrop:not([hidden])')) return;
-  e.preventDefault();
-  e.stopPropagation();
-  gotoChapter(e.key === 'ArrowDown' ? 1 : -1);
-}, true);

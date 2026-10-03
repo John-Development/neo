@@ -301,7 +301,6 @@ function revealCaret() {
   else if (rect.top < box.top + 8) sc.scrollTop -= box.top + 8 - rect.top;
 }
 
-// Backspace at the very start of a chapter swallows an empty chapter above it
 function chapterStartBackspace(e, body, chId) {
   if (e.key !== 'Backspace' || e.metaKey || e.ctrlKey || e.altKey) return false;
   const sel = window.getSelection();

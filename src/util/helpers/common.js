@@ -45,7 +45,15 @@ function cleanChapterEl(id) {
   holder.querySelectorAll('.darling-anchor, .ph-mark, .ghost').forEach((n) => n.remove());
   return holder;
 }
-const chapterText = (id) => cleanChapterEl(id).innerText;
+// Text a line to each paragraph. innerText does that only for what is laid
+// out on screen: of a copy held aside, like the one above, it runs one
+// paragraph's last word into the next one's first ("end.Next"), and the two
+// count as one word. A range's toString runs them together the same way.
+function plainText(root) {
+  root.querySelectorAll('p, div, br').forEach((el) => el.after('\n'));
+  return root.textContent;
+}
+const chapterText = (id) => plainText(cleanChapterEl(id));
 
 // Word counts are cached per chapter and only recomputed for the chapter being edited.
 function chapterWords(chId) {

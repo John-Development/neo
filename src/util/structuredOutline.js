@@ -1,6 +1,6 @@
 /* ================================================================== */
-/*  STRUCTURED OUTLINE                                                 */
-/*  Chapter lines are the book's real chapters. Section notes become   */
+/*  STRUCTURED OUTLINE                                                */
+/*  Chapter lines are the book's real chapters. Section notes become  */
 /*  grayed "ghost" paragraphs in the manuscript                       */
 /* ================================================================== */
 
@@ -285,23 +285,23 @@ function syncGhosts(chId) {
 }
 
 let auxDirty = false;
-$('#aux-editor').addEventListener('keydown', (e) => { if (styleKeepScroll(e)) return; smartKeys(e, e.currentTarget); });
-$('#aux-editor').addEventListener('input', () => {
-  auxDirty = true;
-  scheduleAuxSave();
-  if (spellOn) {
-    const key = 'aux-' + ($('#aux-editor').dataset.kind || 'notes');
-    scheduleSpellRescan(key, $('#aux-editor'));
-  }
-});
-// notes paste arrives clean, same as the manuscript
-$('#aux-editor').addEventListener('paste', (e) => {
-  e.preventDefault();
-  const html = e.clipboardData.getData('text/html');
-  const text = e.clipboardData.getData('text/plain');
-  if (html) document.execCommand('insertHTML', false, cleanPasteHtml(html));
-  else if (text) document.execCommand('insertText', false, text.replace(/\r/g, ''));
-});
+// $('#aux-editor').addEventListener('keydown', (e) => { if (styleKeepScroll(e)) return; smartKeys(e, e.currentTarget); });
+// $('#aux-editor').addEventListener('input', () => {
+//   auxDirty = true;
+//   scheduleAuxSave();
+//   if (spellOn) {
+//     const key = 'aux-' + ($('#aux-editor').dataset.kind || 'notes');
+//     scheduleSpellRescan(key, $('#aux-editor'));
+//   }
+// });
+// // notes paste arrives clean, same as the manuscript
+// $('#aux-editor').addEventListener('paste', (e) => {
+//   e.preventDefault();
+//   const html = e.clipboardData.getData('text/html');
+//   const text = e.clipboardData.getData('text/plain');
+//   if (html) document.execCommand('insertHTML', false, cleanPasteHtml(html));
+//   else if (text) document.execCommand('insertText', false, text.replace(/\r/g, ''));
+// });
 function scheduleAuxSave() {
   clearTimeout(saveTimers.aux);
   saveTimers.aux = setTimeout(flushAux, 800);

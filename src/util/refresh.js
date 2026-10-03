@@ -1,4 +1,4 @@
-/* ================================================================== */
+/* =================================================================== */
 /*  REFRESH — picking up what another device wrote                     */
 /*  A library shared over iCloud or Syncthing changes underneath NEO.  */
 /*  Whenever NEO comes back into view it looks again: a chapter that   */
@@ -6,7 +6,7 @@
 /*  in both places keeps the local text on the page and lands the      */
 /*  other device's version in a new chapter right after it, so that    */
 /*  nothing is ever lost quietly.                                      */
-/* ================================================================== */
+/* =================================================================== */
 
 // True when the disk copy of a chapter has no word the page lacks, but the
 // page has words it lacks: an older copy, not an edit made somewhere else.
@@ -221,19 +221,6 @@ async function refreshFromDisk() {
     refreshing = false;
   }
 }
-window.addEventListener('focus', () => setTimeout(refreshFromDisk, 300));
-// and a quiet look every half minute while NEO is on screen, for the writer
-// who left both machines open
-setInterval(() => { if (document.visibilityState === 'visible') refreshFromDisk(); }, 30000);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') setTimeout(refreshFromDisk, 300);
-  else if (book) flushAllSaves(); // iOS may end a backgrounded app without warning
-});
-
-window.addEventListener('beforeunload', flushAllSaves);
-// flush whenever focus leaves NEO, and every 20 seconds
-window.addEventListener('blur', () => { if (book) flushAllSaves(); });
-setInterval(() => { if (book) flushAllSaves('tick'); }, 20000);
 
 async function backToShelf() {
   if (reading) stopReadAloud(false);
@@ -246,4 +233,3 @@ async function backToShelf() {
   $('#bookshelf-view').hidden = false;
   renderShelves();
 }
-$('#back-to-shelf').onclick = backToShelf;

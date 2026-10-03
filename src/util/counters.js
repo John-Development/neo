@@ -1,5 +1,5 @@
 /* ================================================================== */
-/*  COUNTERS                                                           */
+/*  COUNTERS                                                          */
 /* ================================================================== */
 
 // the story's words: the pages a book carries don't count
@@ -111,51 +111,3 @@ function currentPage(cur) {
   }
   return Math.min(pageCount(bookWordCount()), Math.floor(before / WORDS_PER_PAGE) + 1);
 }
-// click: chapter of chapters ↔ page of pages
-$('#pos-counter').onclick = () => {
-  library.posMode = library.posMode === 'page' ? 'chapter' : 'page';
-  writeLibrary(library);
-  updateCounters();
-};
-$('#word-counter').onclick = () => {
-  wordMode = wordMode === 'book' ? 'chapter' : 'book';
-  updateCounters();
-};
-
-// select a passage → the counter reports its size
-document.addEventListener('selectionchange', () => {
-  // the recount a click asked for would cover the count of the word a
-  // double click goes on to select
-  clearTimeout(saveTimers.selcount);
-  if (!book || currentTab !== 'manuscript') return;
-  const sel = window.getSelection();
-  if (sel && !sel.isCollapsed) {
-    let el = sel.anchorNode;
-    if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
-    if (el && el.closest && el.closest('.chapter-body')) {
-      const n = countWords(sel.toString());
-      if (n > 0) {
-        $('#word-counter').textContent = t('{n} selected', { n });
-        return;
-      }
-    }
-  }
-  saveTimers.selcount = setTimeout(() => { if (book) updateCounters(); }, 150);
-});
-
-// track which chapter you're scrolled to
-$('#paper-scroll').addEventListener('scroll', () => {
-  clearTimeout(saveTimers.scroll);
-  saveTimers.scroll = setTimeout(() => {
-    const mid = window.innerHeight * 0.4;
-    let best = null;
-    for (const sec of $$('.chapter')) {
-      if (sec.getBoundingClientRect().top < mid) best = sec.dataset.id;
-    }
-    if (best && best !== currentChapterId) {
-      currentChapterId = best;
-      highlightNav();
-      updateCounters();
-    }
-  }, 120);
-});

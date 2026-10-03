@@ -103,7 +103,7 @@ function renderChapters() {
         head.classList.toggle('has-title', titleSpan.textContent.trim() !== '');
       });
       titleSpan.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.shiftKey) {
+        if (e.key === 'Enter' && e.shiftKey && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           titleSpan.blur();
           poetryUnderHeading(sec.querySelector('.chapter-body'), chId);
@@ -284,31 +284,6 @@ function copyrightStarter() {
     + `<p>${escHtml(t('All rights reserved.'))}</p>`;
 }
 
-function flushAllSaves(e) {
-  if (!book) return;
-  // remember where you were, for next session and for the other device:
-  // the chapter, the paragraph and the letter (the same place on any
-  // screen) plus the scroll (this screen's). `at` changes only when the
-  // caret does, so a device that merely scrolled never calls the other
-  // one back to an old spot.
-  const prev = book.lastPosition || {};
-  const caret = captureCaret();
-  const spot = caret
-    ? { chapterId: caret.chId, pIdx: caret.pIdx, off: caret.off }
-    : prev.chapterId === currentChapterId ? { chapterId: prev.chapterId, pIdx: prev.pIdx, off: prev.off } : { chapterId: currentChapterId };
-  const scroll = $('#paper-scroll').scrollTop;
-  const newSpot = spot.chapterId !== prev.chapterId || spot.pIdx !== prev.pIdx;
-  const newLetter = newSpot || spot.off !== prev.off;
-  // the regular tick while writing saves a new paragraph; leaving NEO (a
-  // blur, the app going to the background, closing) saves the exact letter
-  const moved = newSpot || (e !== 'tick' && newLetter) || Math.abs((prev.scroll || 0) - scroll) > 40;
-  if (moved) book.lastPosition = { ...spot, scroll, at: newLetter ? Date.now() : (prev.at || Date.now()) };
-  for (const chId of book.chapterOrder) {
-    if (chapterHTML[chId] !== undefined && chapterHTML[chId] !== savedHTML[chId]) {
-      persistChapter(chId);
-    }
-  }
-  flushAux();
-  flushStickiesSave();
-  if (moved || metaSig(book) !== savedMetaSig) saveMeta();
-}
+/* ================================================================== */
+/*  EDITOR — typing                                                   */
+/* ================================================================== */

@@ -2,52 +2,12 @@
 /*  TABS — Manuscript / Notes / Outline / Darlings                     */
 /* ================================================================== */
 
-$$('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-  tab.addEventListener('dblclick', async () => {
-    const kind = tab.dataset.tab;
-    if (kind !== 'notes' && kind !== 'outline') return;
-    const name = await askInput(t('Rename tab'), t('New tab name'), tabName(kind));
-    if (!name) return;
-    book.tabNames[kind] = name;
-    tab.textContent = name;
-    saveMeta();
-    // Renamed tabs become the default for future books
-    library.tabDefaults = library.tabDefaults || {};
-    library.tabDefaults[kind] = name;
-    writeLibrary(library);
-  });
-});
-
 // Darlings tab is a drop target for selected text
 const darlingsTab = $('.tab.darlings');
 // The selection usually collapses by the time a drag lands on the Darlings
 // tab, so the range is remembered at dragstart and the cut is made by NEO
 // itself (dropEffect 'copy' keeps Chromium from moving the text on its own).
 let draggedRange = null;
-document.addEventListener('dragstart', (e) => {
-  // any text drag inside the manuscript lights up the bottom bar
-  if (currentTab === 'manuscript' && e.target.closest && e.target.closest('.chapter-body')) {
-    $('#bottombar').classList.add('attn');
-    const sel = window.getSelection();
-    draggedRange = sel.rangeCount && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
-  }
-});
-document.addEventListener('dragend', () => { $('#bottombar').classList.remove('attn'); draggedRange = null; });
-
-darlingsTab.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-  darlingsTab.classList.add('drag-over');
-});
-darlingsTab.addEventListener('dragleave', () => darlingsTab.classList.remove('drag-over'));
-darlingsTab.addEventListener('drop', async (e) => {
-  e.preventDefault();
-  darlingsTab.classList.remove('drag-over');
-  const html = e.dataTransfer.getData('text/html');
-  const text = e.dataTransfer.getData('text/plain');
-  await moveSelectionToDarlings(html, text);
-});
 
 // ---- text-position helpers: darlings remember home by their surrounding
 // text, so nothing foreign is left inside the manuscript ----

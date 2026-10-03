@@ -49,6 +49,387 @@ document.addEventListener('keydown', (e) => {
   undoShelfMove();
 }, true);
 
+/* =================================================================== */
+/*  POETRY PARAGRAPHS — ⌘⇧Enter (Ctrl+Shift+Enter)                     */
+/*  A paragraph pulled in from the margins, italic: a stanza of verse, */
+/*  a quote, a POV name under the chapter heading. One class, one key. */
+/*  FLUSH PARAGRAPHS — ⇧Enter                                          */
+/*  Prose with no first-line indent: a report, a list, an email, a     */
+/*  sign in the story. ⇧Enter again gives another; Enter is prose.     */
+/* =================================================================== */
+
+document.addEventListener('selectionchange', () => {
+  if (!book || currentTab !== 'manuscript') return;
+  const sel = window.getSelection();
+  let caretP = null;
+  if (sel && sel.rangeCount) {
+    let el = sel.anchorNode;
+    if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    const p = el && el.closest ? el.closest('p') : null;
+    if (p && p.parentElement && p.parentElement.classList.contains('chapter-body')) caretP = p;
+  }
+  if (caretP !== lastCaretPara) {
+    if (lastCaretPara && lastCaretPara.isConnected) {
+      try { lastCaretPara.normalize(); } catch { /* fine */ }
+    }
+    lastCaretPara = caretP;
+  }
+  // during a spellcheck pass, each chapter scans as the caret arrives
+  if (spellOn && caretP) {
+    const ch = caretP.closest('.chapter');
+    if (ch) scanSpellingIn(ch.querySelector('.chapter-body'), ch.dataset.id);
+  }
+  // the drop cap steps aside while the caret is in the first paragraph
+  const inPoetry = !!(caretP && caretP.classList.contains('poetry'));
+  if (inPoetry !== menuPoetryState && window.neo.poetryState) {
+    menuPoetryState = inPoetry;
+    window.neo.poetryState(inPoetry);
+  }
+  const inFlush = !!(caretP && caretP.classList.contains('flush'));
+  if (inFlush !== menuFlushState && window.neo.flushState) {
+    menuFlushState = inFlush;
+    window.neo.flushState(inFlush);
+  }
+  const inFirst = caretP && caretP.parentElement &&
+    caretP === caretP.parentElement.querySelector('p:not(.poetry)');
+  const capBody = inFirst ? caretP.parentElement : null;
+  if (capBody !== capOffBody) {
+    if (capOffBody && capOffBody.isConnected) capOffBody.classList.remove('cap-off');
+    if (capBody) capBody.classList.add('cap-off');
+    capOffBody = capBody;
+  }
+});
+
+// ⌘Z (Ctrl+Z) right after: the styling goes and the marks come back as typed
+document.addEventListener('keydown', (e) => {
+  if (MODIFIER_KEYS.has(e.key)) return; // the ⌘ or Ctrl of ⌘Z, on its way
+  const just = mdJustSet;
+  mdJustSet = null;
+  if (!just || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ') return;
+  e.preventDefault();
+  e.stopPropagation();
+  for (let i = 0; i < just.steps; i++) document.execCommand('undo');
+  // the text is back as it was typed; the mark that was about to close it goes in
+  if (just.block.isConnected) selectChars(just.block, just.end, just.end);
+  document.execCommand('insertText', false, just.key);
+}, true);
+
+// ⌘Z (Ctrl+Z) right after: the hyphen comes back as typed
+document.addEventListener('keydown', (e) => {
+  if (MODIFIER_KEYS.has(e.key)) return; // the ⌘ or Ctrl of ⌘Z, on its way
+  const just = dashJustSet;
+  dashJustSet = null;
+  if (!just || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ' || !just.block.isConnected) return;
+  e.preventDefault();
+  e.stopPropagation();
+  selectChars(just.block, just.at, just.at + just.to.length);
+  document.execCommand('insertText', false, just.was);
+  const caret = just.at + just.was.length + just.key.length;
+  selectChars(just.block, caret, caret);
+}, true);
+
+// ⌘Z (Ctrl+Z) right after: the lowercase comes back as typed
+document.addEventListener('keydown', (e) => {
+  if (MODIFIER_KEYS.has(e.key)) return; // the ⌘ or Ctrl of ⌘Z, on its way
+  const just = capJustSet;
+  capJustSet = null;
+  if (!just || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ' || !just.block.isConnected) return;
+  e.preventDefault();
+  e.stopPropagation();
+  selectChars(just.block, just.at, just.at + 1);
+  document.execCommand('insertText', false, just.was);
+  // a key typed after the "i" stays, with the caret past it
+  const caret = just.at + 1 + just.key.length;
+  selectChars(just.block, caret, caret);
+}, true);
+
+// Titles, outline lines, notes and shelf names get the same typography as
+// the manuscript (which calls smartKeys itself). Capture phase, because
+// those fields keep their keystrokes from bubbling to the page.
+document.addEventListener('keydown', (e) => {
+  const el = e.target;
+  if (e.defaultPrevented || !el || !el.isContentEditable || el.closest('.chapter-body')) return;
+  smartKeys(e, el);
+}, true);
+
+// Title page: Enter drops you into Chapter One.
+$('#tp-title').addEventListener('keydown', titleEnter);
+$('#tp-subtitle').addEventListener('keydown', titleEnter);
+$('#tp-title').addEventListener('input', () => {
+  book.title = $('#tp-title').textContent.trim() || t('Untitled');
+  scheduleMetaSave();
+});
+$('#tp-subtitle').addEventListener('input', () => {
+  book.subtitle = $('#tp-subtitle').textContent.trim();
+  scheduleMetaSave();
+});
+// each book can carry its own pen name
+$('#tp-author').addEventListener('input', () => {
+  book.author = $('#tp-author').textContent.trim();
+  scheduleMetaSave();
+});
+
+$('#tp-title').addEventListener('input', () => {
+  book.title = $('#tp-title').textContent.trim() || t('Untitled');
+  scheduleMetaSave();
+});
+$('#tp-subtitle').addEventListener('input', () => {
+  book.subtitle = $('#tp-subtitle').textContent.trim();
+  scheduleMetaSave();
+});
+// each book can carry its own pen name
+$('#tp-author').addEventListener('input', () => {
+  book.author = $('#tp-author').textContent.trim();
+  scheduleMetaSave();
+});
+
+/* ================================================================== */
+/*  NAV PANE                                                          */
+/* ================================================================== */
+
+$('#nav-add').onclick = () => {
+  switchTab('manuscript');
+  focusChapter(createChapterAt(storyEnd()));
+};
+
+// the + on the seam nearest the pointer, when it's near one (the pane
+// listens, so the seams above the first box and below the last wake too)
+$('#nav-pane').addEventListener('mousemove', (e) => {
+  if (chapterDragActive || e.buttons) return;
+  let near = null;
+  let best = 9;
+  for (const g of navList.querySelectorAll('.nav-gap')) {
+    const d = Math.abs(e.clientY - g.getBoundingClientRect().top);
+    if (d < best) { best = d; near = g; }
+  }
+  for (const g of navList.querySelectorAll('.nav-gap')) g.classList.toggle('near', g === near);
+});
+$('#nav-pane').addEventListener('mouseleave', () => {
+  navList.querySelectorAll('.nav-gap.near').forEach((g) => g.classList.remove('near'));
+});
+
+// Drop also cleans up if rendering removes the source before dragend bubbles.
+// Dragend covers Escape and releases outside a valid drop target.
+document.addEventListener('drop', finishChapterDrag);
+document.addEventListener('dragend', finishChapterDrag);
+
+navList.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer.types.includes('application/x-neo-chapter')) return;
+  e.preventDefault();
+  const ind = navDropInd();
+  const items = [...navList.querySelectorAll('.nav-item:not(.dragging)')];
+  let placed = false;
+  for (const it of items) {
+    const r = it.getBoundingClientRect();
+    if (e.clientY < r.top + r.height / 2) {
+      navList.insertBefore(ind, it);
+      placed = true;
+      break;
+    }
+  }
+  if (!placed) navList.appendChild(ind);
+});
+navList.addEventListener('dragleave', (e) => {
+  if (navList.contains(e.relatedTarget)) return;
+  const ind = document.querySelector('.nav-drop-ind');
+  if (ind) ind.remove();
+});
+navList.addEventListener('drop', async (e) => {
+  const chId = e.dataTransfer.getData('application/x-neo-chapter');
+  if (!chId) return;
+  e.preventDefault();
+  const ind = document.querySelector('.nav-drop-ind');
+  let index = book.chapterOrder.filter((c) => c !== chId).length;
+  if (ind) {
+    index = 0;
+    for (const c of navList.children) {
+      if (c === ind) break;
+      if (c.classList.contains('nav-item') && !c.classList.contains('dragging')) index++;
+    }
+    ind.remove();
+  }
+  const from = book.chapterOrder.indexOf(chId);
+  if (from === -1) return;
+  snapshotStructure('chapter reorder');
+  book.chapterOrder = book.chapterOrder.filter((c) => c !== chId);
+  book.chapterOrder.splice(index, 0, chId);
+  await saveMeta();
+  renderChapters(); // renumbers heads and rebuilds the nav
+  if (currentTab === 'outline') renderOutline();
+});
+
+document.documentElement.addEventListener('mouseleave', closeUnpinnedPanes);
+window.addEventListener('blur', closeUnpinnedPanes);
+
+// the wheel scrolls the manuscript even when the pointer floats over the
+// dark margins beside the (narrower) page column
+$('#editor-view').addEventListener('wheel', (e) => {
+  const scroller = $('#paper-scroll');
+  if (e.ctrlKey) return; // pinch-zoom gesture, not a scroll
+  if (scroller.contains(e.target)) return; // native scrolling handles it
+  if ($('#nav-pane').contains(e.target) || $('#side-pane').contains(e.target)) return;
+  scroller.scrollTop += e.deltaY;
+}, { passive: true });
+
+$('#side-pin').onclick = () => pinPane('side', $('#side-pane').dataset.pinned !== '1');
+$('#nav-pin').onclick = () => pinPane('nav', $('#nav-pane').dataset.pinned !== '1');
+if (!NO_HOVER) {
+  try {
+    const kept = JSON.parse(localStorage.getItem('neo-pinned-panes') || '{}');
+    if (kept.nav) pinPane('nav', true);
+    if (kept.side) pinPane('side', true);
+  } catch { /* nothing kept */ }
+}
+
+/* ================================================================== */
+/*  TABS — Manuscript / Notes / Outline / Darlings                    */
+/* ================================================================== */
+
+$$('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  tab.addEventListener('dblclick', async () => {
+    const kind = tab.dataset.tab;
+    if (kind !== 'notes' && kind !== 'outline') return;
+    const name = await askInput(t('Rename tab'), t('New tab name'), tabName(kind));
+    if (!name) return;
+    book.tabNames[kind] = name;
+    tab.textContent = name;
+    saveMeta();
+    // Renamed tabs become the default for future books
+    library.tabDefaults = library.tabDefaults || {};
+    library.tabDefaults[kind] = name;
+    writeLibrary(library);
+  });
+});
+
+document.addEventListener('dragstart', (e) => {
+  // any text drag inside the manuscript lights up the bottom bar
+  if (currentTab === 'manuscript' && e.target.closest && e.target.closest('.chapter-body')) {
+    $('#bottombar').classList.add('attn');
+    const sel = window.getSelection();
+    draggedRange = sel.rangeCount && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
+  }
+});
+document.addEventListener('dragend', () => { $('#bottombar').classList.remove('attn'); draggedRange = null; });
+
+darlingsTab.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  darlingsTab.classList.add('drag-over');
+});
+darlingsTab.addEventListener('dragleave', () => darlingsTab.classList.remove('drag-over'));
+darlingsTab.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  darlingsTab.classList.remove('drag-over');
+  const html = e.dataTransfer.getData('text/html');
+  const text = e.dataTransfer.getData('text/plain');
+  await moveSelectionToDarlings(html, text);
+});
+
+/* ================================================================== */
+/*  STRUCTURED OUTLINE                                                */
+/*  Chapter lines are the book's real chapters. Section notes become  */
+/*  grayed "ghost" paragraphs in the manuscript                       */
+/* ================================================================== */
+
+$('#aux-editor').addEventListener('keydown', (e) => { if (styleKeepScroll(e)) return; smartKeys(e, e.currentTarget); });
+$('#aux-editor').addEventListener('input', () => {
+  auxDirty = true;
+  scheduleAuxSave();
+  if (spellOn) {
+    const key = 'aux-' + ($('#aux-editor').dataset.kind || 'notes');
+    scheduleSpellRescan(key, $('#aux-editor'));
+  }
+});
+// notes paste arrives clean, same as the manuscript
+$('#aux-editor').addEventListener('paste', (e) => {
+  e.preventDefault();
+  const html = e.clipboardData.getData('text/html');
+  const text = e.clipboardData.getData('text/plain');
+  if (html) document.execCommand('insertHTML', false, cleanPasteHtml(html));
+  else if (text) document.execCommand('insertText', false, text.replace(/\r/g, ''));
+});
+
+/* ================================================================== */
+/*  COUNTERS                                                          */
+/* ================================================================== */
+
+// click: chapter of chapters ↔ page of pages
+$('#pos-counter').onclick = () => {
+  library.posMode = library.posMode === 'page' ? 'chapter' : 'page';
+  writeLibrary(library);
+  updateCounters();
+};
+
+$('#word-counter').onclick = () => {
+  wordMode = wordMode === 'book' ? 'chapter' : 'book';
+  updateCounters();
+};
+
+// select a passage → the counter reports its size
+document.addEventListener('selectionchange', () => {
+  if (!book || currentTab !== 'manuscript') return;
+  // the recount a click asked for would cover the count of the word a
+  // double click goes on to select
+  clearTimeout(saveTimers.selcount);
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) {
+    let el = sel.anchorNode;
+    if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    if (el && el.closest && el.closest('.chapter-body')) {
+      const n = countWords(sel.toString());
+      if (n > 0) {
+        $('#word-counter').textContent = t('{n} selected', { n });
+        return;
+      }
+    }
+  }
+  saveTimers.selcount = setTimeout(() => { if (book) updateCounters(); }, 150);
+});
+
+// track which chapter you're scrolled to
+$('#paper-scroll').addEventListener('scroll', () => {
+  clearTimeout(saveTimers.scroll);
+  saveTimers.scroll = setTimeout(() => {
+    const mid = window.innerHeight * 0.4;
+    let best = null;
+    for (const sec of $$('.chapter')) {
+      if (sec.getBoundingClientRect().top < mid) best = sec.dataset.id;
+    }
+    if (best && best !== currentChapterId) {
+      currentChapterId = best;
+      highlightNav();
+      updateCounters();
+    }
+  }, 120);
+});
+
+/* =================================================================== */
+/*  REFRESH — picking up what another device wrote                     */
+/*  A library shared over iCloud or Syncthing changes underneath NEO.  */
+/*  Whenever NEO comes back into view it looks again: a chapter that   */
+/*  changed on disk and not here is simply adopted; one that changed   */
+/*  in both places keeps the local text on the page and lands the      */
+/*  other device's version in a new chapter right after it, so that    */
+/*  nothing is ever lost quietly.                                      */
+/* =================================================================== */
+
+window.addEventListener('focus', () => setTimeout(refreshFromDisk, 300));
+// and a quiet look every half minute while NEO is on screen, for the writer
+// who left both machines open
+setInterval(() => { if (document.visibilityState === 'visible') refreshFromDisk(); }, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') setTimeout(refreshFromDisk, 300);
+  else if (book) flushAllSaves(); // iOS may end a backgrounded app without warning
+});
+
+window.addEventListener('beforeunload', flushAllSaves);
+// flush whenever focus leaves NEO, and every 20 seconds
+window.addEventListener('blur', () => { if (book) flushAllSaves(); });
+setInterval(() => { if (book) flushAllSaves('tick'); }, 20000);
+
+$('#back-to-shelf').onclick = backToShelf;
+
 /* ================================================================== */
 /*  EDITOR — typing                                                   */
 /* ================================================================== */
@@ -104,6 +485,182 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); }
   stopReadAloud(e.key === 'Escape');
 }, true);
+
+/* ================================================================== */
+/*  FIND & REPLACE                                                    */
+/* ================================================================== */
+
+$('#search-input').addEventListener('input', () => {
+  clearTimeout(saveTimers.search);
+  saveTimers.search = setTimeout(runSearch, 250);
+});
+$('#search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); freshSearchIfStale(); gotoMatch(searchState.idx + (e.shiftKey ? -1 : 1)); }
+  if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
+  if (e.key === 'Tab' && !e.shiftKey) {
+    const m = searchState.matches[Math.max(0, searchState.idx)];
+    if (m) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      const r = m.range.cloneRange();
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      const body = m.range.startContainer.parentElement.closest('[contenteditable="true"]');
+      if (body) body.focus();
+    }
+  }
+});
+$('#replace-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); replaceCurrent(); }
+  if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
+});
+$('#search-next').onclick = () => { freshSearchIfStale(); gotoMatch(searchState.idx + 1); };
+$('#search-prev').onclick = () => { freshSearchIfStale(); gotoMatch(searchState.idx - 1); };
+$('#replace-one').onclick = replaceCurrent;
+$('#replace-all').onclick = replaceAllMatches;
+$('#search-close').onclick = closeSearch;
+
+/* ================================================================== */
+/*  IMPORT                                                            */
+/* ================================================================== */
+
+$('#import-btn').onclick = importBooks;
+
+/* ================================================================== */
+/*  SPELLCHECK PASS + TYPEWRITER SCROLLING                            */
+/* ================================================================== */
+
+// right-click a flagged word for suggestions
+document.addEventListener('contextmenu', async (e) => {
+  if (!spellOn) return;
+  const editor = e.target.closest && e.target.closest('.chapter-body, #aux-editor');
+  if (!editor) return;
+  const pos = document.caretRangeFromPoint(e.clientX, e.clientY);
+  if (!pos || pos.startContainer.nodeType !== Node.TEXT_NODE) return;
+  const node = pos.startContainer;
+  const text = node.data;
+  // a capital slip (see capitalSlips): the letter's capital, and nothing to learn
+  let ws = pos.startOffset;
+  while (ws > 0 && /[\p{L}\p{M}]/u.test(text[ws - 1])) ws--;
+  for (const list of capsRanges.values()) {
+    const hit = list.find((r) => r.startContainer === node && r.startOffset === ws);
+    if (!hit) continue;
+    e.preventDefault();
+    const at = hit.startOffset;
+    const upper = text[at].toLocaleUpperCase(writingLanguage());
+    const chEl = editor.closest('.chapter');
+    showSpellMenu(e.clientX, e.clientY, text[at], [upper], {
+      replace: (s) => {
+        const sel = window.getSelection();
+        const r = document.createRange();
+        r.setStart(node, at); r.setEnd(node, at + 1);
+        sel.removeAllRanges(); sel.addRange(r);
+        document.execCommand('insertText', false, s);
+        if (chEl) spellScanEl(spellElFor(chEl.dataset.id), chEl.dataset.id);
+      }
+    });
+    return;
+  }
+  const isW = (c) => /[\p{L}\p{M}'’]/u.test(c);
+  let a = pos.startOffset, b = pos.startOffset;
+  while (a > 0 && isW(text[a - 1])) a--;
+  while (b < text.length && isW(text[b])) b++;
+  if (a === b) return;
+  let word = spellNorm(text.slice(a, b));
+  if (spellCache.get(word) !== false) {
+    // …or a hyphenated word underlined whole: every piece is a word, the
+    // whole isn't (see spellScanEl)
+    let wa = a, wb = b;
+    while (text[wa - 1] === '-' && isW(text[wa - 2] || '')) { wa--; while (wa > 0 && isW(text[wa - 1])) wa--; }
+    while (text[wb] === '-' && isW(text[wb + 1] || '')) { wb++; while (wb < text.length && isW(text[wb])) wb++; }
+    const whole = spellNorm(text.slice(wa, wb));
+    if (whole === word || spellCache.get(whole) !== false) return; // only flagged words get our menu
+    if (text.slice(wa, wb).split('-').some((w) => spellCache.get(spellNorm(w)) === false)) return;
+    a = wa; b = wb; word = whole;
+  }
+  e.preventDefault();
+  const chEl = editor.closest ? editor.closest('.chapter') : null;
+  const key = editor.id === 'aux-editor'
+    ? 'aux-' + (editor.dataset.kind || 'notes')
+    : (chEl ? chEl.dataset.id : null);
+  const sugg = await window.neo.spellSuggest(word);
+  showSpellMenu(e.clientX, e.clientY, word, sugg, {
+    replace: (s) => {
+      const sel = window.getSelection();
+      const r = document.createRange();
+      r.setStart(node, a); r.setEnd(node, b);
+      sel.removeAllRanges(); sel.addRange(r);
+      document.execCommand('insertText', false, s);
+      if (key) spellScanEl(spellElFor(key), key);
+    },
+    learn: async () => {
+      library.customWords = library.customWords || [];
+      if (!library.customWords.includes(word)) library.customWords.push(word);
+      await writeLibrary(library);
+      await window.neo.spellLearn(word);
+      // Learning also accepts equivalent Unicode spellings. Recheck cached
+      // failures so those variants lose their underlines in every editor.
+      spellCache.clear();
+      spellCache.set(word, true);
+      for (const k of [...spellScanned]) spellScanEl(spellElFor(k), k);
+    }
+  });
+});
+
+new ResizeObserver(() => typewriterRoom()).observe($('#chapters'));
+window.addEventListener('resize', typewriterRoom);
+
+// The page follows the caret only while the writer is typing or moving by
+// keyboard: a click to think about a sentence leaves the screen exactly as
+// it was. The caret has a band of a few lines to move in before the page
+// glides (not snaps) to bring it back to the writing height.
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const el = e.target;
+  if (el && el.closest && el.closest('.chapter-body')) typewriterByKeyboard = true;
+}, true);
+document.addEventListener('mousedown', () => { typewriterByKeyboard = false; }, true);
+
+document.addEventListener('selectionchange', () => {
+  if (!typewriterEnabled || !book || currentTab !== 'manuscript' || !typewriterByKeyboard) return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return;
+  let el = sel.anchorNode;
+  if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+  if (!el || !el.closest || !el.closest('.chapter-body')) return;
+  requestAnimationFrame(() => {
+    try {
+      let rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (!rect || (rect.top === 0 && rect.height === 0)) rect = el.getBoundingClientRect();
+      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 30;
+      const diff = rect.top - window.innerHeight * 0.45;
+      // a band of about three lines around the writing height
+      if (Math.abs(diff) <= lineHeight * 1.5) return;
+      const scroller = $('#paper-scroll');
+      scroller.scrollTo({ top: scroller.scrollTop + diff, behavior: scrollBehavior() });
+    } catch { /* selection mid-mutation; skip this frame */ }
+  });
+});
+
+/* ================================================================== */
+/*  FOCUS MODE: dim everything but the sentence or paragraph          */
+/* ================================================================== */
+
+document.addEventListener('selectionchange', () => {
+  if (focusLevel === 'off') return;
+  requestAnimationFrame(() => { try { updateFocus(); } catch { /* mid-mutation */ } });
+});
+document.addEventListener('input', () => {
+  if (focusLevel === 'off') return;
+  requestAnimationFrame(() => { try { updateFocus(); } catch { /* mid-mutation */ } });
+});
+
+/* ================================================================== */
+/*  COVER ART SETTINGS (File → Cover Art…)                            */
+/* ================================================================== */
+
+$('#goal-counter').onclick = openStats;
 
 /* ================================================================== */
 /*  MENU: Help + fonts                                                */

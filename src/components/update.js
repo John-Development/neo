@@ -1,4 +1,5 @@
 // Help → Check for Update…: on-demand release lookup, only ever runs on a click
+// State
 let updateDialog = null; // the Check for Update… window, while it's open
 
 function updateDialogBox(res) {
