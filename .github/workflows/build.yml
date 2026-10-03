@@ -45,6 +45,17 @@ jobs:
       - run: npm install
       - run: npm install electron-builder --save-dev
       - run: npx electron-builder --win --publish never
+      # The updater downloads the file latest.yml names. GitHub turns spaces
+      # in uploaded names into dots, so a name with a space is one the
+      # updater can never find (Windows updates failed this way through 1.2.4).
+      - name: latest.yml names a file that will upload as named
+        shell: bash
+        run: |
+          want=$(sed -n 's/^path: *//p' dist/latest.yml)
+          if [ -z "$want" ] || [ ! -f "dist/$want" ] || [[ "$want" == *" "* ]]; then
+            echo "::error::latest.yml points at '$want', which isn't a file in dist/ with a space-free name:"; ls dist; exit 1
+          fi
+          echo "latest.yml points at dist/$want"
       - name: Smoke test — app boots and creates its library
         shell: pwsh
         run: |

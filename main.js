@@ -7,6 +7,20 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Every disk request from the page passes through here: a write the system
+// refuses (see reportBlockedWrite) is explained to the writer, then the error
+// goes back to the page as before.
+{
+  const handle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => handle(channel, (...args) => {
+    // a handler's answer keeps its own timing: sync stays sync
+    let out;
+    try { out = fn(...args); } catch (err) { reportBlockedWrite(err); throw err; }
+    if (out && typeof out.then === 'function') out.catch((err) => reportBlockedWrite(err));
+    return out;
+  });
+}
+
 // macOS Chromium's "smart delete" also removes whitespace around a deleted
 // selection, and that pass can duplicate characters. Deletes stay literal.
 app.commandLine.appendSwitch('blink-settings', 'smartInsertDeleteEnabled=false');
@@ -168,6 +182,79 @@ async function chooseLibraryFolder() {
   app.exit(0);
 }
 
+// Can NEO write in this folder? Windows' Controlled folder access (Defender's
+// ransomware protection) refuses new files in Documents to apps it doesn't
+// know, and NEO is one. A small file written and removed tells.
+function folderWritable(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, '.neo-write-test');
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (err) {
+    logError('library folder not writable: ' + dir, err);
+    return false;
+  }
+}
+const isBlockedWrite = (err) => !!err && ['EPERM', 'EACCES', 'EROFS'].includes(err.code);
+function blockedDetail(dir) {
+  return t('Your books can\'t be saved in:\n{dir}', { dir }) + '\n\n' + (process.platform === 'win32'
+    ? t('This is usually Windows Security\'s Controlled folder access (Virus & threat protection → Ransomware protection). Allow NEO there, or keep your library in another folder.')
+    : t('Check that the folder exists and that NEO may write to it, or keep your library in another folder.'));
+}
+// At startup, before any window: a library that can't be written is said
+// plainly, once, with a way out — not a hiccup at "Start writing"
+function checkLibraryWritable() {
+  // (only where it can happen: on Windows, and anywhere before a first
+  // library exists; a synced library elsewhere isn't sent a test file
+  // every launch)
+  if (process.platform !== 'win32' && fs.existsSync(LIBRARY_FILE)) return;
+  while (!folderWritable(LIBRARY_DIR)) {
+    const r = dialog.showMessageBoxSync({
+      type: 'warning',
+      message: t('NEO can\'t save in your library folder'),
+      detail: blockedDetail(LIBRARY_DIR),
+      buttons: [t('Choose Folder…'), t('Try Again'), t('Continue')],
+      defaultId: 0,
+      cancelId: 2
+    });
+    if (r === 2) return;
+    if (r === 0) {
+      const picked = dialog.showOpenDialogSync({
+        title: t('Choose a folder for your NEO library'),
+        defaultPath: os.homedir(),
+        properties: ['openDirectory', 'createDirectory']
+      });
+      if (!picked || !picked[0]) continue;
+      LIBRARY_DIR = picked[0];
+      LIBRARY_FILE = path.join(LIBRARY_DIR, 'library.json');
+      const settings = readSettings();
+      settings.libraryDir = LIBRARY_DIR;
+      try { writeSettings(settings); } catch (err) { logError('settings', err); }
+    }
+  }
+}
+// Later on (the protection switched on mid-session), a refused save says so
+// once. The words stay on the page; NEO saves them as soon as it may.
+let blockedShown = false;
+function reportBlockedWrite(err) {
+  if (blockedShown || !isBlockedWrite(err)) return;
+  // the library's own files only (an export to a protected folder is the
+  // export's business)
+  const rel = err.path ? path.relative(LIBRARY_DIR, err.path) : '..';
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return;
+  blockedShown = true;
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  const opts = {
+    type: 'warning',
+    message: t('NEO can\'t save in your library folder'),
+    detail: blockedDetail(LIBRARY_DIR) + '\n\n' + t('Your words stay on the page until it can.'),
+    buttons: [t('OK')]
+  };
+  (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)).catch(() => {});
+}
+
 function ensureLibrary() {
   if (!fs.existsSync(LIBRARY_DIR)) fs.mkdirSync(LIBRARY_DIR, { recursive: true });
   if (!fs.existsSync(LIBRARY_FILE)) {
@@ -224,18 +311,81 @@ function writeCatalog() {
   }
 }
 
-function readJSON(file, fallback) {
+// Writing that survives the power going out. A new file is written beside
+// the old one, pushed all the way to the disk (fsync), and only then swapped
+// in. Without the push, a power cut right after the swap can leave the swap
+// done and the words not: an empty book.json, and the book gone from its
+// shelf (#219). A missing file or an unlucky moment never costs more than
+// the last few seconds.
+function writeFileDurable(file, data) {
+  const tmp = file + '.tmp';
+  const fd = fs.openSync(tmp, 'w');
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return fallback;
+    fs.writeSync(fd, typeof data === 'string' ? data : Buffer.from(data));
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, file);
+  // the swap itself, on systems that let a folder be pushed too
+  if (process.platform !== 'win32') {
+    try { const d = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(d); } finally { fs.closeSync(d); } } catch { /* fine */ }
   }
 }
 
+// JSON reads fall back on the copies a write leaves: the .tmp a write was
+// making when it stopped, then .bak, the last version that read whole. What
+// they recover is put back as the file itself.
+function parseJSONFile(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return undefined; }
+}
+function readJSON(file, fallback) {
+  const main = parseJSONFile(file);
+  if (main !== undefined) return main;
+  if (!fs.existsSync(file) && !fs.existsSync(file + '.bak')) return fallback;
+  for (const spare of [file + '.tmp', file + '.bak']) {
+    const v = parseJSONFile(spare);
+    if (v === undefined) continue;
+    logError('recovered', `${file} was unreadable; restored from ${path.basename(spare)}`);
+    try { writeFileDurable(file, JSON.stringify(v, null, 2)); } catch (err) { logError('recover write', err); }
+    return v;
+  }
+  return fallback;
+}
+
 function writeJSON(file, data) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, file); // atomic-ish: never leave a half-written file
+  // the version on disk, while it reads whole, becomes the .bak
+  if (parseJSONFile(file) !== undefined) {
+    try { fs.copyFileSync(file, file + '.bak'); } catch { /* the write still goes ahead */ }
+  }
+  writeFileDurable(file, JSON.stringify(data, null, 2));
+}
+
+// A book whose book.json is gone for good (and no .bak) still has its
+// chapters: the book comes back with them in the order they were made, its
+// title from the catalog, rather than vanishing from the shelf.
+function rebuildBookMeta(bookId) {
+  const dir = bookDir(bookId);
+  const chDir = path.join(dir, 'chapters');
+  if (!fs.existsSync(chDir)) return null;
+  let title = '';
+  try {
+    const cat = fs.readFileSync(path.join(LIBRARY_DIR, '_catalog.txt'), 'utf8');
+    const line = cat.split('\n').find((l) => l.includes('  —  ' + bookId + '  —  '));
+    if (line) title = line.split('  —  ')[0].trim();
+  } catch { /* no catalog */ }
+  const order = fs.readdirSync(chDir).filter((f) => f.endsWith('.html')).map((f) => f.slice(0, -5)).sort();
+  const meta = {
+    id: bookId,
+    title: title || t('Untitled'),
+    subtitle: '', series: '', author: t('Anonymous'), wordGoal: 0,
+    created: new Date().toISOString(), modified: new Date().toISOString(),
+    chapterOrder: order,
+    tabNames: { notes: 'Notes', outline: 'Outline' }
+  };
+  logError('recovered', `${bookId}/book.json was lost; rebuilt from ${order.length} chapter files`);
+  try { writeJSON(path.join(dir, 'book.json'), meta); } catch (err) { logError('recover write', err); }
+  return meta;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +394,21 @@ function writeJSON(file, data) {
 
 ipcMain.handle('library:read', () => {
   ensureLibrary();
-  return readJSON(LIBRARY_FILE, null);
+  const lib = readJSON(LIBRARY_FILE, null);
+  if (lib) return lib;
+  // library.json lost with no copy to fall back on: every book in the
+  // folder goes onto one shelf, so nothing disappears
+  const ids = [];
+  try {
+    for (const d of fs.readdirSync(LIBRARY_DIR)) {
+      if (d.startsWith('book-') && fs.existsSync(path.join(LIBRARY_DIR, d, 'chapters'))) ids.push(d);
+    }
+  } catch { /* empty */ }
+  const seed = { authorName: '', penNames: [], firstRunDone: ids.length > 0, pageTheme: 'night',
+    shelves: [{ id: 'shelf-1', name: t('Works in Progress'), bookIds: ids }] };
+  logError('recovered', `library.json was lost; ${ids.length} books put back on one shelf`);
+  try { writeJSON(LIBRARY_FILE, seed); } catch (err) { logError('recover write', err); }
+  return seed;
 });
 
 ipcMain.handle('library:write', (_e, data) => {
@@ -300,7 +464,7 @@ ipcMain.handle('library:listBooks', () => {
 });
 
 ipcMain.handle('book:readMeta', (_e, bookId) => {
-  return readJSON(path.join(bookDir(bookId), 'book.json'), null);
+  return readJSON(path.join(bookDir(bookId), 'book.json'), null) || rebuildBookMeta(bookId);
 });
 
 ipcMain.handle('book:writeMeta', (_e, bookId, meta) => {
@@ -342,7 +506,7 @@ ipcMain.handle('chapter:write', (_e, bookId, chapterId, html) => {
   const dir = path.join(bookDir(bookId), 'chapters');
   const file = path.join(dir, libName(chapterId) + '.html');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, html);
+  writeFileDurable(file, html);
   return true;
 });
 
@@ -363,7 +527,7 @@ ipcMain.handle('aux:read', (_e, bookId, name) => {
 });
 
 ipcMain.handle('aux:write', (_e, bookId, name, html) => {
-  fs.writeFileSync(path.join(bookDir(bookId), libName(name) + '.html'), html);
+  writeFileDurable(path.join(bookDir(bookId), libName(name) + '.html'), html);
   return true;
 });
 
@@ -678,7 +842,7 @@ async function buildZip(zipEntries) {
   });
 }
 
-ipcMain.handle('export:save', async (_e, { format, defaultName, content, zipEntries }) => {
+ipcMain.handle('export:save', async (_e, { format, defaultName, content, zipEntries, base64 }) => {
   const win = BrowserWindow.getFocusedWindow();
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     defaultPath: path.join(os.homedir(), 'Documents', defaultName + '.' + format),
@@ -688,6 +852,9 @@ ipcMain.handle('export:save', async (_e, { format, defaultName, content, zipEntr
   try {
     if (zipEntries) {
       fs.writeFileSync(filePath, await buildZip(zipEntries));
+    } else if (base64) {
+      // pictures (a saved cover) arrive as base64
+      fs.writeFileSync(filePath, Buffer.from(content, 'base64'));
     } else if (format === 'pdf') {
       fs.writeFileSync(filePath, await renderPDF(content));
     } else {
@@ -1059,11 +1226,15 @@ ipcMain.handle('import:pick', async () => {
 const ERROR_LOG = () => path.join(LIBRARY_DIR, 'neo-errors.log');
 
 function logError(source, err) {
+  const line = `[${new Date().toISOString()}] [${source}] ${err && err.stack ? err.stack : String(err)}\n`;
   try {
     ensureLibrary();
-    const line = `[${new Date().toISOString()}] [${source}] ${err && err.stack ? err.stack : String(err)}\n`;
     fs.appendFileSync(ERROR_LOG(), line);
-  } catch { /* never let logging crash the app */ }
+  } catch {
+    // the library can't be written (the very case worth logging): NEO's own
+    // app folder takes the line instead
+    try { fs.appendFileSync(path.join(app.getPath('userData'), 'neo-errors.log'), line); } catch { /* never let logging crash the app */ }
+  }
 }
 
 process.on('uncaughtException', (err) => logError('main', err));
@@ -1147,9 +1318,13 @@ function createWindow() {
   }
   const win = new BrowserWindow({
     ...bounds,
-    minWidth: 800,
+    minWidth: 700,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
+    // the Mac's inset traffic lights. Only there: on Linux any title bar
+    // style but the default leaves the window frameless, and on Wayland the
+    // menu bar lives in that frame (KDE Plasma showed no menu, and Alt
+    // found nothing to show)
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
     backgroundColor: roomColor(libraryPageTheme()),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1171,7 +1346,11 @@ function createWindow() {
     if (win.isDestroyed()) return;
     win.webContents.send('menu', { type: 'fullScreen', value: full }); // the page's bottom bar too
     if (process.platform === 'darwin') return;
-    win.setMenuBarVisibility(!full && !win.isMenuBarAutoHide());
+    // full screen hides the bar until Alt brings it up (and it tucks away
+    // again after a choice), the way Windows apps do; out of full screen
+    // it's always there
+    win.setAutoHideMenuBar(full);
+    win.setMenuBarVisibility(!full);
   });
   win.on('enter-full-screen', () => fullScreenChanged(true));
   win.on('leave-full-screen', () => fullScreenChanged(false));
@@ -1342,11 +1521,18 @@ function sendToWindow(msg) {
 // the Format menu's ticks: whether the caret is in a poetry paragraph, and
 // whether typewriter scrolling is on
 let poetryState = false;
+let flushState = false;
 let typewriterState = false;
 ipcMain.on('poetry:state', (_e, on) => {
   on = !!on;
   if (on === poetryState) return;
   poetryState = on;
+  try { buildMenu(); } catch (err) { logError('menu', err); }
+});
+ipcMain.on('flush:state', (_e, on) => {
+  on = !!on;
+  if (on === flushState) return;
+  flushState = on;
   try { buildMenu(); } catch (err) { logError('menu', err); }
 });
 ipcMain.on('typewriter:state', (_e, on) => {
@@ -1400,10 +1586,10 @@ function buildMenu() {
   // them, so the menu names the faces bundled in fonts/ (see styles.css).
   // The Windows list stays the one the renderer already understands.
   const bodyFonts = isMac
-    ? ['Georgia', 'Palatino', 'Baskerville', 'Hoefler Text', 'Iowan Old Style', 'Jost']
+    ? ['Georgia', 'Palatino', 'Baskerville', 'Hoefler Text', 'Iowan Old Style', 'Jost', 'iA Writer Quattro']
     : isWin
-      ? ['Georgia', 'Palatino', 'Baskerville', 'Cambria', 'Constantia', 'Jost']
-      : ['Gelasio', 'TeX Gyre Pagella', 'Libre Baskerville', 'Alegreya', 'Source Serif Pro', 'Jost'];
+      ? ['Georgia', 'Palatino', 'Baskerville', 'Cambria', 'Constantia', 'Jost', 'iA Writer Quattro']
+      : ['Gelasio', 'TeX Gyre Pagella', 'Libre Baskerville', 'Alegreya', 'Source Serif Pro', 'Jost', 'iA Writer Quattro'];
   const template = [
     // appMenu exists only on macOS — including it on Windows throws,
     // which is exactly what kept NEO from ever opening a window there
@@ -1553,10 +1739,17 @@ function buildMenu() {
           click: () => sendToWindow({ type: 'typewriter' })
         },
         { type: 'separator' },
-        // ticks when the caret sits in a poetry paragraph; ⇧Enter is the
-        // editor's own key, so no accelerator here
+        // tick when the caret sits in one; the keys are the editor's own
+        // (they split or continue a paragraph, which a menu item can't), so
+        // they're named here without an accelerator
         {
-          label: t('Poetry Paragraph') + '\t⇧Enter',
+          label: t('Flush Paragraph') + '\t' + (isMac ? '⇧Enter' : 'Shift+Enter'),
+          type: 'checkbox',
+          checked: flushState,
+          click: () => sendToWindow({ type: 'flush' })
+        },
+        {
+          label: t('Poetry Paragraph') + '\t' + (isMac ? '⇧⌘Enter' : 'Ctrl+Shift+Enter'),
           type: 'checkbox',
           checked: poetryState,
           click: () => sendToWindow({ type: 'poetry' })
@@ -2046,6 +2239,7 @@ app.whenReady().then(() => {
     }
 
     try { initLanguage(); } catch (err) { logError('language', err); }
+    try { checkLibraryWritable(); } catch (err) { logError('library check', err); }
     try { ensureLibrary(); } catch (err) { logError('library', err); }
     createWindow();
     try { initSpell(); } catch (err) { logError('spell', err); }

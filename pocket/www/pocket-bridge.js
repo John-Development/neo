@@ -336,9 +336,10 @@
     // messages the desktop menus do, and the tick marks come back here
     onMenu: (fn) => { window.pocketMenu = fn; },
     poetryState: (on) => { window.pocketState.poetry = !!on; },
+    flushState: (on) => { window.pocketState.flush = !!on; },
     typewriterState: (on) => { window.pocketState.typewriter = !!on; }
   };
-  window.pocketState = { poetry: false, typewriter: false };
+  window.pocketState = { poetry: false, flush: false, typewriter: false };
 
   // Interface language: the same locales/ files as the desktop, picked by
   // the device's language (regional file over its base, English beneath).
@@ -413,22 +414,23 @@
     } catch { /* not on this platform */ }
   });
 
-  // Pocket is written on a real keyboard, so Android's on-screen one stays
-  // down: every editable field gets inputmode="none", which keeps the caret
-  // and hardware typing but never summons the soft keyboard. Long-press the
-  // ☰ button to bring it back for an emergency (and again to send it away).
+  // Android's on-screen keyboard follows the hardware: down while a physical
+  // keyboard is attached (every editable field gets inputmode="none", which
+  // keeps the caret and hardware typing but never summons the soft
+  // keyboard), up as usual when there isn't one. Long-press ☰ flips it for
+  // the moment; plugging a keyboard in or out goes back to following it.
   // iPadOS already hides its keyboard whenever a hardware one is attached,
   // so there the on-screen keyboard behaves normally unless toggled off.
   const EDITABLE = '[contenteditable], input, textarea';
-  let softKeyboard = isIOS();
-  try {
-    const saved = localStorage.getItem('pocket-soft-keyboard');
-    if (saved) softKeyboard = saved === 'on';
-  } catch { /* fine */ }
+  let hardwareKeyboard = false;
+  let flipped = false; // long-press ☰ until the keyboard situation changes
+  try { localStorage.removeItem('pocket-soft-keyboard'); } catch { /* the old always-off setting */ }
+  const softKeyboardOn = () => isIOS() ? !flipped : (hardwareKeyboard === flipped);
   function applyKeyboardMode(root) {
+    const soft = softKeyboardOn();
     const els = root.matches && root.matches(EDITABLE) ? [root] : [];
     (root.querySelectorAll ? [...els, ...root.querySelectorAll(EDITABLE)] : els).forEach((el) => {
-      if (softKeyboard) el.removeAttribute('inputmode');
+      if (soft) el.removeAttribute('inputmode');
       else el.setAttribute('inputmode', 'none');
       // iOS would otherwise autocorrect, capitalise, underline and suggest
       // its way through a manuscript. The page is the writer's alone.
@@ -440,15 +442,33 @@
       }
     });
   }
+  window.pocketSoftKeyboardOn = softKeyboardOn;
   window.pocketToggleSoftKeyboard = () => {
     if (isIOS()) return true; // iOS decides for itself: on screen when no keyboard is attached
-    softKeyboard = !softKeyboard;
-    try { localStorage.setItem('pocket-soft-keyboard', softKeyboard ? 'on' : 'off'); } catch { /* fine */ }
+    flipped = !flipped;
     applyKeyboardMode(document);
-    if (softKeyboard && document.activeElement) { document.activeElement.blur(); }
-    if (typeof toast === 'function') toast(softKeyboard ? 'On-screen keyboard on' : 'On-screen keyboard off — long-press ☰ to bring it back');
-    return softKeyboard;
+    const on = softKeyboardOn();
+    // a field already focused takes the change on its next focus
+    const el = document.activeElement;
+    if (el && el.matches && el.matches(EDITABLE)) { el.blur(); if (on) setTimeout(() => el.focus(), 50); }
+    if (typeof toast === 'function') toast(on ? 'On-screen keyboard on' : 'On-screen keyboard off — long-press ☰ to bring it back');
+    return on;
   };
+  // from MainActivity, when a keyboard is connected or disconnected
+  window.pocketHardwareKeyboard = (attached) => {
+    if (attached === hardwareKeyboard) return;
+    hardwareKeyboard = !!attached;
+    flipped = false;
+    applyKeyboardMode(document);
+    const el = document.activeElement;
+    if (!hardwareKeyboard && el && el.matches && el.matches(EDITABLE)) { el.blur(); setTimeout(() => el.focus(), 50); }
+  };
+  if (!isIOS()) {
+    try {
+      const bars = window.Capacitor.registerPlugin('NeoBars');
+      bars.keyboard().then((r) => window.pocketHardwareKeyboard(!!(r && r.hardware))).catch(() => {});
+    } catch { /* older shell */ }
+  }
   document.addEventListener('DOMContentLoaded', () => {
     applyKeyboardMode(document);
     new MutationObserver((muts) => {
